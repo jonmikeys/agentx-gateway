@@ -3,6 +3,10 @@ import type { RequestAttempt, TokenUsage } from "@/server/db/schema";
 import { type CircuitBreaker, circuitBreaker } from "@/server/gateway/circuit-breaker";
 import { formatSse, SSE_DONE, type SseEvent, SseParser } from "@/server/gateway/sse";
 import {
+  type CapturedResponse,
+  ResponseCapture,
+} from "@/server/gateway/transcript/response-capture";
+import {
   classifyStatus,
   extractUpstreamMessage,
   type MappedError,
@@ -19,11 +23,15 @@ export interface RequestOutcome {
   status: "ok" | "error";
   httpStatus: number;
   errorCode?: string;
+  /** Gateway/upstream error text (never client content); stored as a transcript error item. */
+  errorMessage?: string;
   startedAt: Date;
   durationMs: number;
   ttftMs?: number;
   attempts: RequestAttempt[];
   usage?: TokenUsage;
+  /** What the assistant produced; held in memory and persisted by the caller after completion. */
+  captured?: CapturedResponse;
 }
 
 export interface ChatProxyInput {
@@ -33,6 +41,8 @@ export interface ChatProxyInput {
   route: ResolvedRoute;
   clientSignal: AbortSignal;
   onComplete: (outcome: RequestOutcome) => void;
+  /** Extra headers (for example `X-Session-Id`) set on every response, before the first byte. */
+  responseHeaders?: Record<string, string>;
   breaker?: CircuitBreaker;
   fetchImpl?: typeof fetch;
 }
@@ -206,6 +216,8 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
   const startedAt = new Date();
   const startedMs = performance.now();
   const attempts: RequestAttempt[] = [];
+  const extraHeaders = input.responseHeaders ?? {};
+  const capture = new ResponseCapture();
 
   const finish = (
     partial: Partial<RequestOutcome> & Pick<RequestOutcome, "status" | "httpStatus">,
@@ -218,6 +230,7 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
       attempts,
       ...partial,
     });
+  const withHeaders = (headers: Record<string, string>) => ({ ...extraHeaders, ...headers });
 
   for (const step of input.route.steps) {
     const { provider } = step;
@@ -246,7 +259,7 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
       breaker.releaseTrial(provider.id);
       attempt.outcome = "client_aborted";
       finish({ status: "error", httpStatus: 499, errorCode: "client_closed" });
-      return new Response(null, { status: 499 });
+      return new Response(null, { status: 499, headers: extraHeaders });
     }
 
     if (result.type === "failover") {
@@ -266,6 +279,7 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
         status: "error",
         httpStatus: result.mapped.status,
         errorCode: result.mapped.code,
+        errorMessage: result.mapped.message,
         providerId: provider.id,
         upstreamModel: step.upstreamModel,
       });
@@ -274,9 +288,7 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
         result.mapped.code,
         result.mapped.message,
         result.mapped.type,
-        {
-          "X-Gateway-Provider": provider.name,
-        },
+        withHeaders({ "X-Gateway-Provider": provider.name }),
       );
     }
 
@@ -286,10 +298,24 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
     const answered = { providerId: provider.id, upstreamModel: step.upstreamModel };
 
     if (result.type === "json") {
-      finish({ status: "ok", httpStatus: 200, usage: result.usage, ...answered });
+      try {
+        capture.captureCompletion(JSON.parse(result.text));
+      } catch {
+        // Already validated as JSON by attemptStep; capture is best effort.
+      }
+      finish({
+        status: "ok",
+        httpStatus: 200,
+        usage: result.usage,
+        captured: capture.finish(),
+        ...answered,
+      });
       return new Response(result.text, {
         status: 200,
-        headers: { "Content-Type": "application/json", "X-Gateway-Provider": provider.name },
+        headers: withHeaders({
+          "Content-Type": "application/json",
+          "X-Gateway-Provider": provider.name,
+        }),
       });
     }
 
@@ -300,18 +326,21 @@ export async function proxyChatCompletion(input: ChatProxyInput): Promise<Respon
       providerId: provider.id,
       clientSignal: input.clientSignal,
       startedMs,
-      finish: (extra) => finish({ ...answered, ...extra }),
+      capture,
+      extraHeaders,
+      finish: (extra) => finish({ ...answered, ...extra, captured: capture.finish() }),
     });
   }
 
   const summary = summarizeAttempts(attempts);
-  finish({ status: "error", httpStatus: 502, errorCode: "all_providers_failed" });
-  return openAIError(
-    502,
-    "all_providers_failed",
-    `All providers failed or were skipped: ${summary || "no steps configured"}.`,
-    "api_error",
-  );
+  const message = `All providers failed or were skipped: ${summary || "no steps configured"}.`;
+  finish({
+    status: "error",
+    httpStatus: 502,
+    errorCode: "all_providers_failed",
+    errorMessage: message,
+  });
+  return openAIError(502, "all_providers_failed", message, "api_error", extraHeaders);
 }
 
 interface StreamContext {
@@ -321,6 +350,8 @@ interface StreamContext {
   breaker: CircuitBreaker;
   clientSignal: AbortSignal;
   startedMs: number;
+  capture: ResponseCapture;
+  extraHeaders: Record<string, string>;
   finish: (extra: Partial<RequestOutcome> & Pick<RequestOutcome, "status" | "httpStatus">) => void;
 }
 
@@ -359,6 +390,8 @@ function streamResponse(
         }
       }
       controller.enqueue(encoder.encode(formatSse(event.data)));
+      // Observe after forwarding so capture never delays the client.
+      context.capture.pushEvent(data);
     }
   };
 
@@ -376,7 +409,12 @@ function streamResponse(
     controller.enqueue(encoder.encode(formatSse(JSON.stringify(error))));
     controller.enqueue(encoder.encode(formatSse(SSE_DONE)));
     controller.close();
-    complete({ status: "error", httpStatus: 200, errorCode: "upstream_stream_error" });
+    complete({
+      status: "error",
+      httpStatus: 200,
+      errorCode: "upstream_stream_error",
+      errorMessage: error.error.message,
+    });
   };
 
   const body = new ReadableStream<Uint8Array>({
@@ -427,6 +465,7 @@ function streamResponse(
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       "X-Accel-Buffering": "no",
+      ...context.extraHeaders,
       "X-Gateway-Provider": context.provider,
     },
   });

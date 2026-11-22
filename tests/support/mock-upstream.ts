@@ -11,6 +11,10 @@ import type { AddressInfo } from "node:net";
  *   slow             waits `slowMs` (default 1500 ms) before answering (exceeds small timeouts)
  *   midstream-fail   streams two chunks, then destroys the socket
  *   empty-stream     200 with an empty body
+ *   reasoning        streams `reasoning_content` (then `reasoning`) before the answer
+ *   think-tags       streams the thinking inside <think>...</think> tags split across chunks
+ *   tool-call        asks for the client tool `show_image`; after a tool result it answers in text
+ *   echo             answers "Echo: <last user message>" (for search and redaction tests)
  * Self-contained (no `@/` imports) so Playwright and tsx can run it.
  */
 export interface RecordedRequest {
@@ -66,6 +70,68 @@ function chunk(content: string, finishReason: string | null = null): string {
   })}\n\n`;
 }
 
+type Delta = Record<string, unknown>;
+
+/** Delta sequence for a model behaviour; each entry becomes one SSE chunk. */
+function scriptedDeltas(
+  model: string,
+  lastRole: string,
+  lastUserText: string,
+): Delta[] | undefined {
+  switch (model) {
+    case "reasoning":
+      return [
+        { reasoning_content: "The user greets me. " },
+        { reasoning: "I should answer warmly." },
+        { content: "Hello " },
+        { content: "from the reasoning model." },
+      ];
+    case "think-tags":
+      return [
+        { content: "<thi" },
+        { content: "nk>Considering the " },
+        { content: "request carefully.</th" },
+        { content: "ink>Here is my " },
+        { content: "considered answer." },
+      ];
+    case "tool-call":
+      if (lastRole === "tool") {
+        return [{ content: "Done! " }, { content: "I put the image on screen." }];
+      }
+      return [
+        { content: "Let me show that. " },
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_mock_1",
+              type: "function",
+              function: { name: "show_image", arguments: "" },
+            },
+          ],
+        },
+        { tool_calls: [{ index: 0, function: { arguments: '{"media_id":' } }] },
+        { tool_calls: [{ index: 0, function: { arguments: '"sunset"}' } }] },
+      ];
+    case "echo":
+      return [{ content: "Echo: " }, { content: lastUserText }];
+    default:
+      return undefined;
+  }
+}
+
+function lastMessage(body: Record<string, unknown> | undefined): { role: string; user: string } {
+  const messages = Array.isArray(body?.messages)
+    ? (body.messages as Record<string, unknown>[])
+    : [];
+  const last = messages.at(-1);
+  const lastUser = [...messages].reverse().find((message) => message.role === "user");
+  return {
+    role: String(last?.role ?? ""),
+    user: typeof lastUser?.content === "string" ? lastUser.content : "",
+  };
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function startMockUpstream(options: MockUpstreamOptions = {}): Promise<MockUpstream> {
@@ -117,6 +183,73 @@ export async function startMockUpstream(options: MockUpstreamOptions = {}): Prom
     }
 
     const usage = { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 };
+    const { role: lastRole, user: lastUserText } = lastMessage(body);
+    const scripted = scriptedDeltas(model, lastRole, lastUserText);
+    if (scripted) {
+      const calls = scripted.flatMap((delta) =>
+        Array.isArray(delta.tool_calls) ? (delta.tool_calls as Record<string, unknown>[]) : [],
+      );
+      if (!stream) {
+        const message: Record<string, unknown> = {
+          role: "assistant",
+          content: scripted.map((delta) => String(delta.content ?? "")).join("") || null,
+        };
+        const reasoning = scripted.map((delta) => String(delta.reasoning_content ?? "")).join("");
+        if (reasoning) message.reasoning_content = reasoning;
+        if (calls.length > 0) {
+          message.tool_calls = [
+            {
+              id: "call_mock_1",
+              type: "function",
+              function: {
+                name: "show_image",
+                arguments: calls.map((call) => (call.function as Delta).arguments ?? "").join(""),
+              },
+            },
+          ];
+        }
+        sendJson(response, 200, {
+          id: "chatcmpl-mock",
+          object: "chat.completion",
+          created: 1,
+          model,
+          choices: [{ index: 0, message, finish_reason: calls.length > 0 ? "tool_calls" : "stop" }],
+          usage,
+        });
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+      for (const delta of scripted) {
+        response.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-mock",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "mock",
+            choices: [{ index: 0, delta, finish_reason: null }],
+          })}\n\n`,
+        );
+        await sleep(10);
+      }
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-mock",
+          object: "chat.completion.chunk",
+          choices: [
+            { index: 0, delta: {}, finish_reason: calls.length > 0 ? "tool_calls" : "stop" },
+          ],
+        })}\n\n`,
+      );
+      const scriptedStreamOptions = body?.stream_options as { include_usage?: boolean } | undefined;
+      if (scriptedStreamOptions?.include_usage) {
+        response.write(
+          `data: ${JSON.stringify({ id: "chatcmpl-mock", object: "chat.completion.chunk", choices: [], usage })}\n\n`,
+        );
+      }
+      response.write("data: [DONE]\n\n");
+      response.end();
+      return;
+    }
     if (!stream) {
       sendJson(response, 200, {
         id: "chatcmpl-mock",

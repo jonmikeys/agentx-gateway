@@ -81,3 +81,34 @@ export const chatCompletionRequestSchema = z.looseObject({
   model: z.unknown().optional(),
   stream: z.boolean().optional(),
 });
+
+export const sessionSettingsSchema = z.object({
+  idle_timeout_minutes: z.coerce.number().int().min(1).max(10_080),
+  retention_days: z.coerce.number().int().min(0).max(3650),
+  redaction_enabled: z.boolean(),
+});
+
+export const sessionStatusSchema = z.enum(["active", "expired", "ended"]);
+
+/** Query filters shared by the session list, bulk export and bulk delete. */
+export const sessionFiltersSchema = z.object({
+  status: sessionStatusSchema.optional(),
+  api_key_id: z.uuid().optional(),
+  route: z.string().trim().min(1).optional(),
+  agent: z.string().trim().min(1).optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
+  include_standalone: z.boolean().default(false),
+  q: z.string().trim().min(1).max(200).optional(),
+});
+
+export type SessionFiltersInput = z.infer<typeof sessionFiltersSchema>;
+
+export const sessionBulkDeleteSchema = z
+  .object({
+    ids: z.array(z.uuid()).min(1).max(1000).optional(),
+    filters: sessionFiltersSchema.optional(),
+  })
+  .refine((value) => (value.ids !== undefined) !== (value.filters !== undefined), {
+    message: "Provide either ids or filters",
+  });

@@ -6,6 +6,7 @@ import { type ClientEnv, recordTokenUsage } from "@/server/gateway/client-auth";
 import { logger } from "@/server/logger";
 import { recordLlmRequest } from "@/server/services/llm-requests";
 import { listEnabledRoutes, resolveRoute, selectRoute } from "@/server/services/routes";
+import { persistRequest, resolveSession, SESSION_HEADER } from "@/server/services/sessions";
 
 /** Fields consumed by the gateway that must never reach the upstream provider. */
 const GATEWAY_ONLY_FIELDS = ["agent_id"];
@@ -56,8 +57,39 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
     }
 
     const apiKey = c.get("apiKey");
+
+    // Session contract (Unity protocol): no header starts a session, a header continues it,
+    // an unknown/expired/ended id is 404 session_not_found. `agent_id` is wired in G7a.
+    const session = await resolveSession({
+      headerValue: c.req.header(SESSION_HEADER),
+      apiKeyId: apiKey.id,
+      routeSlug: route.slug,
+      agentId: null,
+    });
+    if (!session) {
+      return openAIError(404, "session_not_found", "Session is unknown or expired.");
+    }
+
+    const persist = async (outcome: RequestOutcome) => {
+      try {
+        await persistRequest({
+          sessionId: session.sessionId,
+          apiKeyId: apiKey.id,
+          messages: parsed.data.messages,
+          outcome,
+        });
+      } catch (error) {
+        logger.error("Failed to store transcript", {
+          error: error instanceof Error ? error.message : "unknown error",
+          session_id: session.sessionId,
+        });
+        // The session may have been deleted mid-request; still keep the request log.
+        await recordLlmRequest(apiKey.id, outcome);
+      }
+    };
+
     const onComplete = (outcome: RequestOutcome) => {
-      recordLlmRequest(apiKey.id, outcome)
+      persist(outcome)
         .then(() => recordTokenUsage(apiKey, outcome.usage?.total_tokens ?? 0))
         .catch((error: unknown) =>
           logger.error("Failed to record request", {
@@ -81,6 +113,7 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
       stream: parsed.data.stream === true,
       route,
       clientSignal: c.req.raw.signal,
+      responseHeaders: { [SESSION_HEADER]: session.sessionId },
       onComplete,
     });
   });

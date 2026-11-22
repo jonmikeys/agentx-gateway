@@ -7,6 +7,7 @@ import { invalidateApiKeyCache } from "@/server/gateway/client-auth-cache";
 import { createApiKey } from "@/server/services/api-keys";
 import { createProvider } from "@/server/services/providers";
 import { createRoute } from "@/server/services/routes";
+import { resetSessionSettingsCacheForTests } from "@/server/services/session-settings";
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "secret";
@@ -29,9 +30,10 @@ export async function prepareDatabase(databaseUrl: string): Promise<void> {
 /** Empties every G2 table and resets in-process state (breaker, key cache). */
 export async function resetGatewayState(): Promise<void> {
   await getDb().execute(
-    sql`truncate table llm_requests, rate_counters, route_steps, model_routes, api_keys, providers cascade`,
+    sql`truncate table settings, sessions, llm_requests, rate_counters, route_steps, model_routes, api_keys, providers cascade`,
   );
   circuitBreaker.reset();
+  resetSessionSettingsCacheForTests();
   invalidateApiKeyCache();
 }
 
