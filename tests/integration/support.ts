@@ -27,10 +27,10 @@ export async function prepareDatabase(databaseUrl: string): Promise<void> {
   await runMigrations(databaseUrl);
 }
 
-/** Empties every G2 table and resets in-process state (breaker, key cache). */
+/** Empties every gateway table and resets in-process state (breaker, key cache). */
 export async function resetGatewayState(): Promise<void> {
   await getDb().execute(
-    sql`truncate table settings, sessions, llm_requests, rate_counters, route_steps, model_routes, api_keys, providers cascade`,
+    sql`truncate table settings, sessions, llm_requests, rate_counters, route_steps, model_routes, api_keys, providers, media_items, cameras cascade`,
   );
   circuitBreaker.reset();
   resetSessionSettingsCacheForTests();

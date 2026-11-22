@@ -249,3 +249,57 @@ export const llmRequests = pgTable(
     index("llm_requests_session_idx").on(table.sessionId),
   ],
 );
+
+export type MediaKind = "image" | "video";
+export type MediaSource = "upload" | "external_url";
+
+/**
+ * Media the avatar may show (docs/media-content.md). `upload` items live in `MediaStorage`
+ * under `storage_key`; `external_url` items are only linked (type and size checked on save).
+ */
+export const mediaItems = pgTable(
+  "media_items",
+  {
+    /** `med_` + 12 hex characters. Stable: the model and Unity refer to it. */
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    kind: text("kind").$type<MediaKind>().notNull(),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    enabled: boolean("enabled").notNull().default(true),
+    source: text("source").$type<MediaSource>().notNull(),
+    /** Key inside `MediaStorage`; null for external items. */
+    storageKey: text("storage_key"),
+    /** Absolute http(s) URL; null for uploads. */
+    externalUrl: text("external_url"),
+    mimeType: text("mime_type").notNull(),
+    /** Null when an external server did not report a size. */
+    sizeBytes: integer("size_bytes"),
+    width: integer("width"),
+    height: integer("height"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("media_items_kind_idx").on(table.kind)],
+);
+
+/**
+ * Camera feeds the avatar may show. `type` is an open union validated in application code
+ * (`cameraInputSchema`): `lookat_sidecar` and `mjpeg_url` today, `rtsp_via_relay` reserved for
+ * a future go2rtc/MediaMTX relay. `config` holds the type-specific fields (`{url}` for
+ * `mjpeg_url`); `credentials` is an encrypted JSON `{username,password}` or null.
+ */
+export const cameras = pgTable("cameras", {
+  /** `cam_` + 12 hex characters. */
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  enabled: boolean("enabled").notNull().default(true),
+  type: text("type").notNull(),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+  /** Encrypted with encryptSecret(); registered in encrypted-columns.ts. */
+  credentials: text("credentials"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

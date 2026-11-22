@@ -21,8 +21,13 @@ export async function proxy(request: NextRequest) {
   }
 }
 
+/**
+ * `api/admin/media/upload` is excluded because Next.js buffers (and past 10 MB truncates) the body
+ * of every request that passes through the proxy, which would break 200 MB video uploads. The
+ * route still requires AdminAuth: the Hono admin app checks credentials itself (`requireAdmin`).
+ */
 export const config = {
   matcher: [
-    "/((?!v1(?:/|$)|agents(?:/|$)|health(?:/|$)|_next/|favicon\\.ico$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|webmanifest)$).*)",
+    "/((?!v1(?:/|$)|agents(?:/|$)|health(?:/|$)|api/admin/media/upload$|_next/|favicon\\.ico$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml|webmanifest)$).*)",
   ],
 };
