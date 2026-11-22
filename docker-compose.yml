@@ -1,0 +1,61 @@
+# AGENTX Gateway: app + Postgres (+ optional Caddy for automatic HTTPS).
+#
+#   cp .env.example .env     # fill in the required values
+#   docker compose up -d --build
+#   docker compose --profile tls up -d --build   # adds Caddy (needs GATEWAY_DOMAIN)
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agentx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentx}
+      POSTGRES_DB: ${POSTGRES_DB:-agentx}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    image: agentx-gateway:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Points at the bundled postgres service; overrides DATABASE_URL from .env.
+      DATABASE_URL: postgres://${POSTGRES_USER:-agentx}:${POSTGRES_PASSWORD:-agentx}@postgres:5432/${POSTGRES_DB:-agentx}
+      MEDIA_STORAGE_DIR: /data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_BIND_ADDRESS:-0.0.0.0}:${GATEWAY_PORT:-3000}:3000"
+    volumes:
+      - media-data:/data/media
+
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    restart: unless-stopped
+    environment:
+      # Set GATEWAY_DOMAIN in .env to your public domain; "localhost" gives a locally trusted dev cert.
+      GATEWAY_DOMAIN: ${GATEWAY_DOMAIN:-localhost}
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  media-data:
+  caddy-data:
+  caddy-config:
