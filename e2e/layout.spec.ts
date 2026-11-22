@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
-import { type APIRequestContext, expect, type Page, request, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
-import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
+import { keyLabel, providerNames, routeSlug, type SessionIds } from "./layout-seed";
 
 /**
  * Layout guards (docs/ui-qa.md): for every page in nav.ts and the key dialogs, at desktop and
@@ -18,86 +18,9 @@ const viewports = [
 ] as const;
 const themes = ["light", "dark"] as const;
 
-const providerNames = {
-  long: "Layout QA provider with an extremely long title that keeps going 123",
-  short: "Layout QA mock",
-};
-const longBaseUrlPath = `/v1/${"a".repeat(120)}`;
-const routeSlug = "layout-qa-route-with-a-very-long-id-for-checking-layout-1234";
 const runId = Date.now().toString(36);
-const keyLabel = "Layout QA key \u{1F680} with a long text that keeps going and going on";
 
-let upstream: MockUpstream;
-
-async function seed(admin: APIRequestContext) {
-  const list = async (collection: string) =>
-    ((await (await admin.get(`/api/admin/${collection}`)).json()).data ?? []) as Record<
-      string,
-      string
-    >[];
-  const ids: Record<string, string> = {};
-  const providers = [
-    { name: providerNames.long, base_url: `${upstream.url}${longBaseUrlPath}` },
-    { name: providerNames.short, base_url: upstream.url },
-  ];
-  for (const { name, base_url } of providers) {
-    const found = (await list("providers")).find((provider) => provider.name === name);
-    if (found) {
-      ids[name] = found.id;
-      // The mock upstream gets a new port every run, so point reused rows at the current one.
-      if (found.base_url !== base_url) {
-        const response = await admin.patch(`/api/admin/providers/${found.id}`, {
-          data: { base_url },
-        });
-        expect(response.status()).toBe(200);
-      }
-      continue;
-    }
-    const response = await admin.post("/api/admin/providers", {
-      data: { name, base_url, api_key: "sk-layout-qa-not-a-real-key" },
-    });
-    expect(response.status()).toBe(201);
-    ids[name] = (await response.json()).id;
-  }
-  if (!(await list("routes")).some((route) => route.slug === routeSlug)) {
-    const steps = Array.from({ length: 10 }, (_, index) => ({
-      provider_id: index % 2 === 0 ? ids[providerNames.long] : ids[providerNames.short],
-      upstream_model: `vendor/extremely-long-model-name-${"x".repeat(50)}-v${index}`,
-      timeout_ms: 20000,
-    }));
-    const response = await admin.post("/api/admin/routes", {
-      data: { slug: routeSlug, description: `Layout QA ${"lorem ipsum ".repeat(15)}`, steps },
-    });
-    expect(response.status()).toBe(201);
-  }
-  if (!(await list("api-keys")).some((key) => key.label === keyLabel)) {
-    const response = await admin.post("/api/admin/api-keys", {
-      data: {
-        label: keyLabel,
-        rpm_limit: 60,
-        ip_allowlist: ["203.0.113.0/24", "2001:db8::/32", "198.51.100.0/24", "192.0.2.0/24"],
-      },
-    });
-    expect(response.status()).toBe(201);
-  }
-}
-
-test.beforeAll(async ({ baseURL }) => {
-  upstream = await startMockUpstream({ models: ["ok", "mock-model"] });
-  const admin = await request.newContext({
-    baseURL,
-    httpCredentials: { username, password },
-  });
-  try {
-    await seed(admin);
-  } finally {
-    await admin.dispose();
-  }
-});
-
-test.afterAll(async () => {
-  await upstream.close();
-});
+const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
 
 test.use({ httpCredentials: { username, password } });
 // Sequential: the tests share seeded rows and create API keys.
@@ -270,6 +193,87 @@ for (const viewport of viewports) {
       await expectDialogContained(page);
       await page.keyboard.press("Escape");
       await expect(revoke).toBeFocused();
+    });
+
+    test("sessions list: bulk delete confirmation stays inside the dialog", async ({ page }) => {
+      await openPage(page, "/sessions");
+      await expect(page.getByRole("link", { name: /UTC$/ }).first()).toBeVisible();
+      const boxes = page.getByRole("checkbox", { name: /^Select session/ });
+      await boxes.nth(0).click();
+      await boxes.nth(1).click();
+      const bulkDelete = page.getByRole("button", { name: /^Delete 2/ });
+      await bulkDelete.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="alertdialog"]');
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await expect(bulkDelete).toBeFocused();
+    });
+
+    test("sessions list: search, standalone toggle and sort keep the page inside the viewport", async ({
+      page,
+    }) => {
+      await openPage(page, "/sessions");
+      await page.getByLabel("Search transcripts").fill("x".repeat(60));
+      await expectNoHorizontalScroll(page);
+      await page.getByLabel("Include standalone").click();
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+    });
+
+    for (const scenario of ["chat", "reasoning", "tools", "ended"] as const) {
+      for (const theme of themes) {
+        test(`transcript (${scenario}): layout and axe, ${theme} theme`, async ({ page }) => {
+          await page.addInitScript((value) => {
+            window.localStorage.setItem("theme", value);
+          }, theme);
+          await openPage(page, `/sessions/${sessionIds[scenario]}`);
+          for (const trigger of await page.getByRole("button", { name: /^Thinking/ }).all()) {
+            await trigger.click();
+          }
+          const systemPrompt = page.getByRole("button", { name: /^System prompt/ });
+          if (await systemPrompt.count()) await systemPrompt.click();
+          await expectNoHorizontalScroll(page);
+          await expectNamedControls(page);
+          await expectNoSeriousAxeViolations(page);
+          if (scenario === "ended") {
+            await expect(page.getByRole("button", { name: "End session" })).toBeDisabled();
+            await expect(page.getByTestId("live-indicator")).toHaveCount(0);
+          } else {
+            await expect(page.getByTestId("live-indicator")).toBeVisible();
+          }
+        });
+      }
+    }
+
+    test("transcript: failover popover stays inside the viewport", async ({ page }) => {
+      await openPage(page, `/sessions/${sessionIds.chat}`);
+      const trigger = page.getByRole("button", { name: "2 attempts" }).first();
+      await trigger.click();
+      const popover = page.getByText("Failover attempts");
+      await expect(popover).toBeVisible();
+      const box = await page.locator('[data-slot="popover-content"]').boundingBox();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+      await expectNoSeriousAxeViolations(page, '[data-slot="popover-content"]');
+      await page.keyboard.press("Escape");
+      await expect(popover).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    });
+
+    test("transcript: end and delete confirmations stay inside the dialog", async ({ page }) => {
+      await openPage(page, `/sessions/${sessionIds.reasoning}`);
+      const end = page.getByRole("button", { name: "End session" });
+      await end.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(end).toBeFocused();
+
+      const remove = page.getByRole("button", { name: "Delete", exact: true });
+      await remove.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(remove).toBeFocused();
     });
 
     test("command palette stays inside the dialog", async ({ page }) => {
