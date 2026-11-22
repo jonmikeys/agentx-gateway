@@ -23,11 +23,14 @@ need it.
 
 | Path | Purpose |
 |---|---|
-| `src/app/(crm)/` | Admin console pages (placeholders in G1) inside the sidebar shell |
+| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Providers, Model Routes, API Keys implemented; the rest are placeholders) |
 | `src/app/v1`, `src/app/agents`, `src/app/health` | Thin Next route files that mount the Hono client API |
 | `src/app/api/admin` | Mounts the admin Hono app (requires AdminAuth) |
 | `src/proxy.ts` | Guards every CRM page and `/api/admin/*` with HTTP Basic auth |
-| `src/server/api/` | Hono apps (`app.ts` client API, `admin-app.ts` admin API) and `openAIError()` |
+| `src/server/api/` | Hono apps (`app.ts` client API, `admin-app.ts` admin API, `admin/*` CRUD routers, `client-routes.ts`) and `openAIError()` |
+| `src/server/services/` | Providers, routes, API keys and settings services shared by the admin API and server components |
+| `src/server/gateway/` | Chat proxy with failover, circuit breaker, SSE parser, client auth, CIDR matcher, rate counters |
+| `src/lib/gateway-schemas.ts` | Zod schemas shared by the admin API and CRM forms |
 | `src/server/auth/` | `AdminAuth` seam, `BasicAdminAuth`, failed-login rate limiter |
 | `src/server/crypto/` | AES-256-GCM secrets, the encrypted-column registry, key rotation |
 | `src/server/db/` | Drizzle schema, lazy client, migration runner |
@@ -43,7 +46,7 @@ need it.
 Browser / Unity -> Next.js
   /, /sessions, ...  -> src/proxy.ts (Basic auth + rate limit) -> CRM page
   /api/admin/*       -> src/proxy.ts -> Hono admin app (auth again, defence in depth)
-  /v1/*, /agents     -> Hono client API (own auth in later stages; CORS exposes X-Session-Id)
+  /v1/*, /agents     -> Hono client API (Bearer API key auth; CORS exposes X-Session-Id)
   /health            -> Hono client API (public)
 ```
 
@@ -81,9 +84,10 @@ backup first, and keep the new key somewhere safe: without it secrets are unreco
 
 | Command | What it covers |
 |---|---|
-| `pnpm test:unit` | Secrets (round trip, tamper detection, masking), env validation, AdminAuth parsing and rate limit, `openAIError`, CORS and 404 shape, nav data integrity |
-| `pnpm test:integration` | Migrations apply to a real Postgres (Testcontainers), `/health` returns `db:true`, returns 503 when the database is unreachable, secret rotation is atomic. Needs Docker |
-| `pnpm test:e2e` | Playwright smoke test against a running app: 401 without credentials, sidebar groups, navigation to Sessions, Ctrl+K palette, `/api/admin/me` |
+| `pnpm test:unit` | Secrets (round trip, tamper detection, masking), env validation, AdminAuth parsing and rate limit, `openAIError`, CORS and 404 shape, nav data integrity, CIDR matcher, API key format, route selection, failover classifier and error mapping, circuit breaker, SSE parser |
+| `pnpm test:integration` | Migrations apply to a real Postgres (Testcontainers), `/health`, secret rotation (including the provider columns), the admin API (secrets never returned), and the client API against `tests/support/mock-upstream.ts`: passthrough, failover, circuit breaker, error mapping, auth, allowlist and rate limits, request log. Needs Docker |
+| `pnpm test:e2e` | Playwright against a running app: 401 without credentials, sidebar groups, navigation, Ctrl+K palette, `/api/admin/me`, and the G2 flow (create provider, test it, create route and API key, call the gateway through a mock upstream) |
+| `pnpm screenshots` | Captures every CRM page plus key states (light and dark, 1440x900) into `docs/screenshots`. Needs a running app and a fresh database; see `playwright.screenshots.config.ts` |
 
 Run the e2e tests against a built app:
 
