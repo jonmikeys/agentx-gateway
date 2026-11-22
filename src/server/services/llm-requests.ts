@@ -1,6 +1,6 @@
 import { getDb } from "@/server/db/client";
 import { llmRequests } from "@/server/db/schema";
-import type { RequestOutcome } from "@/server/gateway/chat-proxy";
+import type { RequestOutcome } from "@/server/gateway/llm-proxy";
 
 /** Minimal executor shared by the pool and a transaction. */
 type Executor = Pick<ReturnType<typeof getDb>, "insert">;
@@ -27,6 +27,8 @@ export async function recordLlmRequest(
       providerId: outcome.providerId ?? null,
       upstreamModel: outcome.upstreamModel ?? null,
       stream: outcome.stream,
+      clientApi: outcome.clientApi,
+      upstreamApi: outcome.upstreamApi ?? null,
       status: outcome.status,
       httpStatus: outcome.httpStatus,
       errorCode: outcome.errorCode ?? null,

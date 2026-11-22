@@ -5,6 +5,8 @@ export interface CapturedToolCall {
   id?: string;
   name?: string;
   args: unknown;
+  /** Raw argument JSON text exactly as streamed (kept for API translation). */
+  rawArguments: string;
 }
 
 /** What the assistant produced for one request; held in memory and persisted after the stream. */
@@ -34,7 +36,15 @@ function asObject(value: unknown): Json | undefined {
  * Accumulates assistant output from upstream SSE `data:` payloads (or one JSON completion).
  * Pure in-memory work: chunks are forwarded to the client first, this only observes them.
  */
-export class ResponseCapture {
+export interface OutputCapture {
+  /** Feeds one SSE data payload; `eventName` is the SSE `event:` field when present. */
+  pushEvent(data: string, eventName?: string): void;
+  /** Reads a complete (non-streamed) response body. */
+  captureCompletion(body: unknown): void;
+  finish(): CapturedResponse;
+}
+
+export class ResponseCapture implements OutputCapture {
   private text = "";
   private reasoning = "";
   private error: string | undefined;
@@ -100,6 +110,7 @@ export class ResponseCapture {
         id: call.id,
         name: call.name,
         args: parseToolArguments(call.args),
+        rawArguments: call.args,
       }));
     return {
       text: this.text.trim(),

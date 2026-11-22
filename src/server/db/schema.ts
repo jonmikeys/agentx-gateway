@@ -20,6 +20,9 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Wire format of one LLM call: Chat Completions or the Responses API. */
+export type LlmApi = "chat" | "responses";
+
 export interface ProviderCapabilities {
   streaming: boolean;
   tools: boolean;
@@ -227,6 +230,10 @@ export const llmRequests = pgTable(
     providerId: uuid("provider_id").references(() => providers.id, { onDelete: "set null" }),
     upstreamModel: text("upstream_model"),
     stream: boolean("stream").notNull().default(false),
+    /** API the client spoke (`chat` = /v1/chat/completions, `responses` = /v1/responses). */
+    clientApi: text("client_api").$type<LlmApi>().notNull().default("chat"),
+    /** API the answering provider was called with; null when no provider answered. */
+    upstreamApi: text("upstream_api").$type<LlmApi>(),
     status: text("status").$type<"ok" | "error">().notNull(),
     httpStatus: integer("http_status"),
     errorCode: text("error_code"),

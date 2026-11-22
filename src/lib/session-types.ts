@@ -59,6 +59,9 @@ export interface LinkedRequestView {
   provider_name: string | null;
   upstream_model: string | null;
   stream: boolean;
+  /** API the client spoke and the API the provider was called with (differ when translated). */
+  client_api: "chat" | "responses";
+  upstream_api: "chat" | "responses" | null;
   status: "ok" | "error";
   http_status: number | null;
   error_code: string | null;
