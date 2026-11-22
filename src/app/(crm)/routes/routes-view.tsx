@@ -1,13 +1,14 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { RouteEditorDialog } from "@/app/(crm)/routes/route-editor-dialog";
 import { DataTable } from "@/components/crm/data-table";
 import { PageHeader } from "@/components/crm/page-header";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,136 +38,149 @@ export function RoutesView({
   const [editing, setEditing] = useState<RouteView | undefined>();
   const [deleting, setDeleting] = useState<RouteView | undefined>();
 
-  async function run(action: () => Promise<unknown>, success: string) {
-    try {
-      await action();
-      toast.success(success);
-      router.refresh();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }
+  const run = useCallback(
+    async (action: () => Promise<unknown>, success: string) => {
+      try {
+        await action();
+        toast.success(success);
+        router.refresh();
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [router],
+  );
 
-  function toggleEnabled(route: RouteView, enabled: boolean) {
-    return run(
-      () =>
-        adminFetch(`routes/${route.id}`, {
-          method: "PUT",
-          body: {
-            slug: route.slug,
-            description: route.description,
-            enabled,
-            steps: route.steps.map((step) => ({
-              provider_id: step.provider_id,
-              upstream_model: step.upstream_model,
-              timeout_ms: step.timeout_ms,
-            })),
-          },
-        }),
-      enabled ? "Route enabled" : "Route disabled",
-    );
-  }
+  const toggleEnabled = useCallback(
+    (route: RouteView, enabled: boolean) =>
+      run(
+        () =>
+          adminFetch(`routes/${route.id}`, {
+            method: "PUT",
+            body: {
+              slug: route.slug,
+              description: route.description,
+              enabled,
+              steps: route.steps.map((step) => ({
+                provider_id: step.provider_id,
+                upstream_model: step.upstream_model,
+                timeout_ms: step.timeout_ms,
+              })),
+            },
+          }),
+        enabled ? "Route enabled" : "Route disabled",
+      ),
+    [run],
+  );
 
-  const columns: ColumnDef<RouteView, unknown>[] = [
-    {
-      accessorKey: "slug",
-      header: "Slug",
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={
-              row.original.is_default
-                ? `${row.original.slug} is the default route`
-                : `Make ${row.original.slug} the default route`
-            }
-            aria-pressed={row.original.is_default}
-            disabled={row.original.is_default || !row.original.enabled}
-            onClick={() =>
-              run(
-                () => adminFetch(`routes/${row.original.id}/default`, { method: "POST" }),
-                `${row.original.slug} is now the default route`,
-              )
-            }
-          >
-            <Star
-              className={
-                row.original.is_default ? "fill-current text-primary" : "text-muted-foreground"
+  // Stable column definitions: TanStack renders cells as components, so a new array on every
+  // render would remount the row buttons and drop keyboard focus.
+  const columns = useMemo<ColumnDef<RouteView, unknown>[]>(
+    () => [
+      {
+        accessorKey: "slug",
+        header: "Slug",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={
+                row.original.is_default
+                  ? `${row.original.slug} is the default route`
+                  : `Make ${row.original.slug} the default route`
               }
-            />
-          </Button>
-          <span className="font-medium">{row.original.slug}</span>
-          {row.original.is_default && <Badge variant="secondary">Default</Badge>}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "description",
-      header: "Description",
-      cell: ({ row }) => (
-        <span className="text-muted-foreground">{row.original.description || "-"}</span>
-      ),
-    },
-    {
-      id: "steps",
-      header: "Failover chain",
-      enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex flex-wrap items-center gap-1 text-xs">
-          {row.original.steps.map((step, index) => (
-            <span key={step.position} className="flex items-center gap-1">
-              {index > 0 && <ArrowRight className="size-3 text-muted-foreground" />}
-              <Badge variant="outline">
-                {step.provider_name} / {step.upstream_model}
-              </Badge>
-            </span>
-          ))}
-        </div>
-      ),
-    },
-    {
-      id: "enabled",
-      header: "Enabled",
-      enableSorting: false,
-      cell: ({ row }) => (
-        <Switch
-          aria-label={`Enable ${row.original.slug}`}
-          checked={row.original.enabled}
-          disabled={row.original.is_default}
-          onCheckedChange={(checked) => toggleEnabled(row.original, checked)}
-        />
-      ),
-    },
-    {
-      id: "actions",
-      header: () => <span className="sr-only">Actions</span>,
-      enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={`Edit ${row.original.slug}`}
-            onClick={() => {
-              setEditing(row.original);
-              setEditorOpen(true);
-            }}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={`Delete ${row.original.slug}`}
-            onClick={() => setDeleting(row.original)}
-          >
-            <Trash2 />
-          </Button>
-        </div>
-      ),
-    },
-  ];
+              aria-pressed={row.original.is_default}
+              disabled={row.original.is_default || !row.original.enabled}
+              onClick={() =>
+                run(
+                  () => adminFetch(`routes/${row.original.id}/default`, { method: "POST" }),
+                  `${row.original.slug} is now the default route`,
+                )
+              }
+            >
+              <Star
+                className={
+                  row.original.is_default ? "fill-current text-primary" : "text-muted-foreground"
+                }
+              />
+            </Button>
+            <TruncatedText text={row.original.slug} className="max-w-56 font-medium" />
+            {row.original.is_default && <Badge variant="secondary">Default</Badge>}
+          </div>
+        ),
+      },
+      {
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => (
+          <TruncatedText
+            text={row.original.description || "-"}
+            className="max-w-80 text-muted-foreground"
+          />
+        ),
+      },
+      {
+        id: "steps",
+        header: "Failover chain",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <ol className="flex flex-col gap-1 text-xs">
+            {row.original.steps.map((step, index) => (
+              <li key={step.position} className="flex items-center gap-1.5">
+                <span className="w-4 shrink-0 text-right text-muted-foreground">{index + 1}</span>
+                <Badge variant="outline" className="max-w-56">
+                  <TruncatedText text={`${step.provider_name} / ${step.upstream_model}`} />
+                </Badge>
+              </li>
+            ))}
+          </ol>
+        ),
+      },
+      {
+        id: "enabled",
+        header: "Enabled",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Switch
+            aria-label={`Enable ${row.original.slug}`}
+            checked={row.original.enabled}
+            disabled={row.original.is_default}
+            onCheckedChange={(checked) => toggleEnabled(row.original, checked)}
+          />
+        ),
+      },
+      {
+        id: "actions",
+        header: () => <span className="sr-only">Actions</span>,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Edit ${row.original.slug}`}
+              onClick={() => {
+                setEditing(row.original);
+                setEditorOpen(true);
+              }}
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Delete ${row.original.slug}`}
+              onClick={() => setDeleting(row.original)}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [run, toggleEnabled],
+  );
 
   return (
     <div className="flex flex-col gap-6">

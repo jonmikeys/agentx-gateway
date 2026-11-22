@@ -123,7 +123,7 @@ function SortableStep({
         </button>
         <span className="text-xs font-medium text-muted-foreground">{index + 1}</span>
       </div>
-      <div className="grid flex-1 gap-3 sm:grid-cols-[1fr_1fr_6rem]">
+      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem]">
         <Field data-invalid={!!stepErrors?.provider_id}>
           <FieldLabel>Provider</FieldLabel>
           <Controller
