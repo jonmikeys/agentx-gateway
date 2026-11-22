@@ -35,3 +35,7 @@ AGENTX Gateway: a self-hostable, OpenAI-compatible API gateway and admin CRM. Ne
 - Admin authentication goes through the `AdminAuth` seam (`src/server/auth/admin-auth.ts`); do not read credentials elsewhere. `src/proxy.ts` guards all CRM pages.
 - Database changes: edit `src/server/db/schema.ts`, run `pnpm db:generate`, commit the generated SQL in `drizzle/`. Migrations apply automatically at server start and via `pnpm db:migrate`.
 - UI: shadcn/ui components live in `src/components/ui` (generated, excluded from Biome). Add new ones with `pnpm dlx shadcn@latest add <name>`. Use theme tokens (no one-off colours). Navigation is defined once in `src/components/app-shell/nav.ts` (sidebar, breadcrumbs and command palette all read it).
+
+## UI changes
+
+- Any change to CRM UI must pass the checklist in [`docs/ui-qa.md`](docs/ui-qa.md) (states, 390 to 1440 px viewports, dark mode, focus, overflow, long data) and keep `e2e/layout.spec.ts` green. Review regenerated `docs/screenshots` as images, not just as a diff.
