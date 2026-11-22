@@ -68,8 +68,27 @@ describe("database migrations", () => {
     expect(row.updatedAt).toBeInstanceOf(Date);
   });
 
-  it("starts with an empty encrypted column registry", () => {
-    expect(encryptedColumns).toEqual([]);
+  it("registers every encrypted provider column", () => {
+    expect(encryptedColumns).toEqual(
+      expect.arrayContaining([
+        { table: "providers", column: "api_key", primaryKey: ["id"] },
+        { table: "providers", column: "extra_headers", primaryKey: ["id"] },
+      ]),
+    );
+  });
+
+  it("rotates the real provider columns via the registry", async () => {
+    const oldKey = generateEncryptionKey();
+    const newKey = generateEncryptionKey();
+    await sql`insert into providers (name, base_url, api_key, extra_headers) values
+      ('RotateP1', 'http://a', ${encryptSecretWithKey("key-one", oldKey)}, ${encryptSecretWithKey('{"X":"1"}', oldKey)}),
+      ('RotateP2', 'http://b', null, null)`;
+    const rotated = await rotateSecrets(sql, oldKey, newKey, encryptedColumns);
+    expect(rotated).toBe(2);
+    const [row] = await sql<{ api_key: string; extra_headers: string }[]>`
+      select api_key, extra_headers from providers where name = 'RotateP1'`;
+    expect(decryptSecretWithKey(row.api_key, newKey)).toBe("key-one");
+    expect(decryptSecretWithKey(row.extra_headers, newKey)).toBe('{"X":"1"}');
   });
 
   it("rotates registered secret columns atomically", async () => {
