@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildUpstreamBody, extractUsage } from "@/server/gateway/chat-proxy";
+import { buildUpstreamBody, extractUsage } from "@/server/gateway/llm-proxy";
 import {
   classifyStatus,
   extractUpstreamMessage,
