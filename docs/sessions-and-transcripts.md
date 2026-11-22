@@ -80,6 +80,10 @@ text accumulates in memory, and everything is written in one transaction after t
 `client_closed` outcome stores the partial text but no error item. Transcript text is never
 logged.
 
+### Responses API requests
+
+`POST /v1/responses` uses the same contract and the same diffing: the Responses `input` is normalized to chat messages first (see [responses-api.md](responses-api.md)), so a Responses session is stored and shown exactly like a chat session. The per-turn metadata in the viewer adds a badge with the client and upstream API (`responses → chat` when translated).
+
 ## Turn grouping
 
 A **turn** starts when the new items contain a `user` message. A request whose new items are only

@@ -16,6 +16,9 @@ for the agreed design.
 - **OpenAI-compatible chat completions** (stream and non-stream) with ordered provider failover,
   a per-provider circuit breaker and automatic usage reporting.
   See [docs/providers-and-routes.md](docs/providers-and-routes.md).
+- **Responses API** (`POST /v1/responses`): forwarded natively to providers that support it and
+  translated to and from chat completions for the rest, per route step, with the same failover,
+  sessions and transcripts. See [docs/responses-api.md](docs/responses-api.md).
 - **Providers and model routes** managed in the CRM; provider keys are encrypted at rest and
   write-only.
 - **Client API keys** with hashed storage, shown once, optional IP allowlist, requests/minute and
