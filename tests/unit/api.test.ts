@@ -13,7 +13,8 @@ describe("openAIError", () => {
 });
 
 describe("API app routing", () => {
-  const app = createApiApp();
+  // Bypass API key auth: these tests cover routing, 404 shape and CORS only.
+  const app = createApiApp({ clientAuth: async (_c, next) => next() });
 
   it("returns an OpenAI-shaped not_found (never session_not_found) for unknown /v1 routes", async () => {
     const response = await app.request("/v1/unknown");
@@ -50,5 +51,18 @@ describe("API app routing", () => {
     const response = await app.request("/agents", { headers: { origin: "http://example.com" } });
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-expose-headers")).toContain("X-Session-Id");
+  });
+});
+
+describe("client API authentication", () => {
+  it("rejects requests without a Bearer key with 401 invalid_api_key", async () => {
+    const response = await createApiApp().request("/v1/models");
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("invalid_api_key");
+  });
+
+  it("leaves /health public", async () => {
+    const response = await createApiApp().request("/health");
+    expect(response.status).not.toBe(401);
   });
 });
