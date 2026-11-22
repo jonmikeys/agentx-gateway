@@ -3,11 +3,12 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { CircleCheck, CircleX, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ProviderFormDialog } from "@/app/(crm)/providers/provider-form-dialog";
 import { DataTable } from "@/components/crm/data-table";
 import { PageHeader } from "@/components/crm/page-header";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,16 +53,22 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
     { provider: ProviderView; result: ProviderTestResult } | undefined
   >();
 
-  async function toggleEnabled(provider: ProviderView, enabled: boolean) {
-    try {
-      await adminFetch(`providers/${provider.id}`, { method: "PATCH", body: { enabled } });
-      router.refresh();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }
+  const lastTestedId = useRef<string | undefined>(undefined);
 
-  async function runTest(provider: ProviderView) {
+  const toggleEnabled = useCallback(
+    async (provider: ProviderView, enabled: boolean) => {
+      try {
+        await adminFetch(`providers/${provider.id}`, { method: "PATCH", body: { enabled } });
+        router.refresh();
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    },
+    [router],
+  );
+
+  const runTest = useCallback(async (provider: ProviderView) => {
+    lastTestedId.current = provider.id;
     setTesting(provider.id);
     try {
       const result = await adminFetch<ProviderTestResult>(`providers/${provider.id}/test`, {
@@ -73,7 +80,7 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
     } finally {
       setTesting(undefined);
     }
-  }
+  }, []);
 
   async function confirmDelete(provider: ProviderView) {
     try {
@@ -86,18 +93,25 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
     }
   }
 
+  // Stable column definitions: TanStack renders cells as components, so a new array on every
+  // render would remount the row buttons and drop keyboard focus.
   const columns = useMemo<ColumnDef<ProviderView, unknown>[]>(
     () => [
       {
         accessorKey: "name",
         header: "Name",
-        cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+        cell: ({ row }) => (
+          <TruncatedText text={row.original.name} className="max-w-64 font-medium" />
+        ),
       },
       {
         accessorKey: "base_url",
         header: "Base URL",
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-muted-foreground">{row.original.base_url}</span>
+          <TruncatedText
+            text={row.original.base_url}
+            className="max-w-72 font-mono text-xs text-muted-foreground"
+          />
         ),
       },
       {
@@ -117,7 +131,7 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
         header: "Capabilities",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex gap-1">
             {Object.entries(row.original.capabilities)
               .filter(([, on]) => on)
               .map(([name]) => (
@@ -155,10 +169,13 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
               variant="outline"
               size="sm"
               disabled={testing === row.original.id}
+              data-test-provider={row.original.id}
               onClick={() => runTest(row.original)}
             >
               <Zap />
-              {testing === row.original.id ? "Testing..." : "Test connection"}
+              <span className="sr-only xl:not-sr-only">
+                {testing === row.original.id ? "Testing..." : "Test connection"}
+              </span>
             </Button>
             <Button
               variant="ghost"
@@ -183,7 +200,7 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
         ),
       },
     ],
-    [testing],
+    [testing, toggleEnabled, runTest],
   );
 
   return (
@@ -212,7 +229,15 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
       <ProviderFormDialog open={formOpen} provider={editing} onOpenChange={setFormOpen} />
 
       <Dialog open={testResult !== undefined} onOpenChange={() => setTestResult(undefined)}>
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            // The row's button is disabled and re-rendered while the test runs, so look it up again.
+            document
+              .querySelector<HTMLElement>(`[data-test-provider="${lastTestedId.current}"]`)
+              ?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {testResult?.result.ok ? (
@@ -222,7 +247,9 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
               )}
               Connection {testResult?.result.ok ? "succeeded" : "failed"}
             </DialogTitle>
-            <DialogDescription>{testResult?.provider.name}</DialogDescription>
+            <DialogDescription className="break-words">
+              {testResult?.provider.name}
+            </DialogDescription>
           </DialogHeader>
           {testResult && (
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -233,7 +260,7 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
                   <dt className="text-muted-foreground">Models</dt>
                   <dd>{testResult.result.model_count}</dd>
                   <dt className="text-muted-foreground">Sample</dt>
-                  <dd className="font-mono text-xs">
+                  <dd className="min-w-0 font-mono text-xs break-words">
                     {testResult.result.models.slice(0, 8).join(", ") || "none"}
                   </dd>
                 </>

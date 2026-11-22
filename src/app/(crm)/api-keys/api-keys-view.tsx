@@ -3,11 +3,12 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { Check, Copy, KeyRound, Pencil, Plus, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiKeyFormDialog } from "@/app/(crm)/api-keys/api-key-form-dialog";
 import { DataTable } from "@/components/crm/data-table";
 import { PageHeader } from "@/components/crm/page-header";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +43,7 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
   const [revoking, setRevoking] = useState<ApiKeyView | undefined>();
   const [created, setCreated] = useState<{ key: string; label: string } | undefined>();
   const [copied, setCopied] = useState(false);
+  const newKeyButton = useRef<HTMLButtonElement>(null);
 
   async function copyKey(key: string) {
     try {
@@ -69,7 +71,9 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
       {
         accessorKey: "label",
         header: "Label",
-        cell: ({ row }) => <span className="font-medium">{row.original.label}</span>,
+        cell: ({ row }) => (
+          <TruncatedText text={row.original.label} className="max-w-64 font-medium" />
+        ),
       },
       {
         accessorKey: "key_prefix",
@@ -104,7 +108,10 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
           row.original.ip_allowlist.length === 0 ? (
             <span className="text-muted-foreground">Any</span>
           ) : (
-            <span className="font-mono text-xs">{row.original.ip_allowlist.join(", ")}</span>
+            <TruncatedText
+              text={row.original.ip_allowlist.join(", ")}
+              className="max-w-56 font-mono text-xs"
+            />
           ),
       },
       {
@@ -158,6 +165,7 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
         description="Issue, label and revoke client API keys."
         action={
           <Button
+            ref={newKeyButton}
             onClick={() => {
               setEditing(undefined);
               setFormOpen(true);
@@ -185,29 +193,42 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
       />
 
       <Dialog open={created !== undefined} onOpenChange={() => setCreated(undefined)}>
-        <DialogContent>
+        <DialogContent
+          className="sm:max-w-lg"
+          onCloseAutoFocus={(event) => {
+            // The form that created the key is already unmounted, so return to the page action.
+            event.preventDefault();
+            newKeyButton.current?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="size-5" />
+              <KeyRound className="size-5 shrink-0" />
               API key created
             </DialogTitle>
-            <DialogDescription>{created?.label}</DialogDescription>
+            <DialogDescription className="break-words">{created?.label}</DialogDescription>
           </DialogHeader>
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+            className="flex min-w-0 items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-foreground"
           >
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            Copy this key now. It won't be shown again; only a hash is stored.
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+            <span className="min-w-0">
+              Copy this key now. It won't be shown again; only a hash is stored.
+            </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <code
               data-testid="created-api-key"
-              className="flex-1 overflow-x-auto rounded-lg border bg-muted px-3 py-2 font-mono text-sm"
+              className="min-w-0 flex-1 rounded-lg border bg-muted px-3 py-2 font-mono text-sm break-all"
             >
               {created?.key}
             </code>
-            <Button variant="outline" onClick={() => created && copyKey(created.key)}>
+            <Button
+              variant="outline"
+              className="shrink-0"
+              onClick={() => created && copyKey(created.key)}
+            >
               {copied ? <Check /> : <Copy />}
               {copied ? "Copied" : "Copy"}
             </Button>

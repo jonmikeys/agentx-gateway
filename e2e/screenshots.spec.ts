@@ -21,11 +21,15 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const username = process.env.E2E_ADMIN_USERNAME ?? process.env.ADMIN_USERNAME ?? "";
 const password = process.env.E2E_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD ?? "";
 const outputDir = path.resolve(process.cwd(), "docs/screenshots");
+// Both are configurable so captures can run beside other instances: E2E_BASE_URL (default
+// http://localhost:3000) and MOCK_UPSTREAM_PORT (default 4010).
 const MOCK_PORT = Number(process.env.MOCK_UPSTREAM_PORT ?? 4010);
 const databaseUrl =
   process.env.E2E_DATABASE_URL ??
   process.env.DATABASE_URL ??
   "postgres://agentx:agentx@localhost:5432/agentx";
+// The one-time key shown in the "API key created" capture. Fixed so reruns are identical.
+const DEMO_API_KEY = `agx_${"x".repeat(32)}`;
 const themes = ["light", "dark"] as const;
 
 interface Captured {
@@ -341,11 +345,29 @@ for (const theme of themes) {
       }, theme);
     });
 
+    /** Waits for network, fonts, open dialogs and animations so captures never show mid-transition frames. */
     async function settle(page: import("@playwright/test").Page) {
       await page.waitForLoadState("networkidle");
+      await page.addStyleTag({
+        content:
+          "*, *::before, *::after { animation: none !important; transition: none !important; }",
+      });
       await page.evaluate(() => document.fonts.ready);
       // Charts animate in; wait for them to finish before capturing.
       await page.waitForTimeout(800);
+    }
+
+    /** Dialogs must be fully open and no closing dialog or overlay may remain stacked behind. */
+    async function settleDialog(page: import("@playwright/test").Page, expectedOpen = 1) {
+      const open = page.locator(
+        '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+      );
+      await expect(open).toHaveCount(expectedOpen);
+      await expect(page.locator('[data-slot$="overlay"][data-state="closed"]')).toHaveCount(0);
+      await expect(page.locator('[role="dialog"][data-state="closed"]')).toHaveCount(0);
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
     }
 
     async function save(
@@ -384,7 +406,7 @@ for (const theme of themes) {
       await page.getByRole("button", { name: "New provider" }).click();
       await page.getByLabel("Name").fill("Groq");
       await page.getByLabel("Base URL").fill("https://api.groq.com/openai/v1");
-      await expect(page.getByRole("dialog")).toBeVisible();
+      await settleDialog(page);
       await save(
         page,
         "state-provider-dialog",
@@ -401,6 +423,7 @@ for (const theme of themes) {
         .getByRole("button", { name: "Test connection" })
         .click();
       await expect(page.getByRole("heading", { name: "Connection succeeded" })).toBeVisible();
+      await settleDialog(page);
       // Latency varies per run; pin it so regenerated images stay stable.
       await page.evaluate(() => {
         for (const node of document.querySelectorAll("dd")) {
@@ -419,9 +442,8 @@ for (const theme of themes) {
       await page.goto("/routes");
       await settle(page);
       await page.getByRole("button", { name: "Edit avatar-default" }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
       await expect(page.getByRole("button", { name: "Move step 2 up" })).toBeVisible();
-      await page.waitForTimeout(500);
+      await settleDialog(page);
       await save(
         page,
         "state-route-editor",
@@ -432,15 +454,22 @@ for (const theme of themes) {
 
     test("state: API key shown once", async ({ page }) => {
       await page.goto("/api-keys");
+      // Answer the create call locally: nothing is stored, so reruns never add keys, and the
+      // key shown is the fixed demo value instead of a random one.
+      await page.route("**/api/admin/api-keys", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ id: "demo", label: "Reception tablet", key: DEMO_API_KEY }),
+        });
+      });
       await settle(page);
       await page.getByRole("button", { name: "New API key" }).click();
-      await page.getByLabel("Label").fill(`Reception tablet (${theme})`);
+      await page.getByRole("textbox", { name: "Label" }).fill("Reception tablet");
       await page.getByRole("button", { name: "Create key" }).click();
       await expect(page.getByText("won't be shown again")).toBeVisible();
-      // The key differs on every run; mask the digits so regenerated images stay stable.
-      await page.getByTestId("created-api-key").evaluate((node) => {
-        node.textContent = `agx_${"x".repeat(32)}`;
-      });
+      await settleDialog(page);
       await save(
         page,
         "state-api-key-created",
@@ -563,6 +592,7 @@ for (const theme of themes) {
       await settle(page);
       await page.keyboard.press("Control+k");
       await expect(page.getByPlaceholder("Go to page...")).toBeVisible();
+      await settleDialog(page);
       await save(page, "state-command-palette", "Ctrl+K command palette listing every page", false);
     });
   });
