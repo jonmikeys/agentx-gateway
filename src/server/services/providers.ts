@@ -18,6 +18,8 @@ export interface ProviderView {
   api_key_masked: string | null;
   extra_header_names: string[];
   circuit_state: CircuitState;
+  /** Slugs of routes whose steps use this provider (deleting is blocked while non-empty). */
+  used_by_routes: string[];
   created_at: string;
   updated_at: string;
 }
@@ -54,7 +56,7 @@ export function toProviderRuntime(row: ProviderRow): ProviderRuntime {
   };
 }
 
-export function toProviderView(row: ProviderRow): ProviderView {
+export function toProviderView(row: ProviderRow, usedByRoutes: string[] = []): ProviderView {
   return {
     id: row.id,
     name: row.name,
@@ -64,6 +66,7 @@ export function toProviderView(row: ProviderRow): ProviderView {
     api_key_masked: row.apiKey ? maskSecret(decryptSecret(row.apiKey)) : null,
     extra_header_names: Object.keys(parseHeaders(row.extraHeaders)),
     circuit_state: circuitBreaker.state(row.id),
+    used_by_routes: usedByRoutes,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -76,8 +79,17 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export async function listProviders(): Promise<ProviderView[]> {
-  const rows = await getDb().select().from(providers).orderBy(providers.name);
-  return rows.map(toProviderView);
+  const db = getDb();
+  const rows = await db.select().from(providers).orderBy(providers.name);
+  const usage = await db
+    .selectDistinct({ providerId: routeSteps.providerId, slug: modelRoutes.slug })
+    .from(routeSteps)
+    .innerJoin(modelRoutes, eq(routeSteps.routeId, modelRoutes.id));
+  const byProvider = new Map<string, string[]>();
+  for (const { providerId, slug } of usage) {
+    byProvider.set(providerId, [...(byProvider.get(providerId) ?? []), slug].sort());
+  }
+  return rows.map((row) => toProviderView(row, byProvider.get(row.id) ?? []));
 }
 
 async function findProviderRow(id: string): Promise<ProviderRow> {
@@ -87,7 +99,8 @@ async function findProviderRow(id: string): Promise<ProviderRow> {
 }
 
 export async function getProvider(id: string): Promise<ProviderView> {
-  return toProviderView(await findProviderRow(id));
+  const row = await findProviderRow(id);
+  return toProviderView(row, await findRoutesUsingProvider(id));
 }
 
 /** Decrypted provider for connectivity tests. */
