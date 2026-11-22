@@ -118,8 +118,9 @@ The Providers page shows the state (Healthy, Circuit open, Half-open).
 Every client request writes one `llm_requests` row: API key, route slug, the provider and
 upstream model that answered, stream flag, status, HTTP status, error code, start time, duration,
 time to first token, the list of attempts (`provider_id`, `provider_name`, `model`, `outcome`,
-`http_status`, `error_code`, `latency_ms`) and token usage. **Message content is never stored or
-logged.** Stage G3 links these rows to sessions and turns.
+`http_status`, `error_code`, `latency_ms`) and token usage. **Message content is never stored in this table or
+logged.** Since G3 each row also carries `session_id` and `turn_id`; the transcript text lives in
+`transcript_items` (see [sessions-and-transcripts.md](sessions-and-transcripts.md)).
 
 ## Admin API
 

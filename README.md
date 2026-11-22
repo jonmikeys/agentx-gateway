@@ -6,7 +6,9 @@ registry, multi-provider failover, and visual agent chatflows built on LangGraph
 
 Status: under construction. G1 (scaffold) provides the admin console shell, authentication,
 database, encrypted secrets and `/health`. G2 (routing core) adds the OpenAI-compatible
-`/v1/models` and `/v1/chat/completions` with provider failover. See [docs/spec.md](docs/spec.md)
+`/v1/models` and `/v1/chat/completions` with provider failover. G3 (sessions) adds the
+`X-Session-Id` session contract, transcript capture and the Sessions, Dashboard and Settings
+pages. See [docs/spec.md](docs/spec.md)
 for the agreed design.
 
 ## Features
@@ -18,6 +20,11 @@ for the agreed design.
   write-only.
 - **Client API keys** with hashed storage, shown once, optional IP allowlist, requests/minute and
   tokens/day limits. See [docs/api-keys.md](docs/api-keys.md).
+- **Sessions and transcripts**: the AGENTX `X-Session-Id` contract, stored transcripts with
+  thinking blocks and tool calls, a transcript viewer with live updates, full-text search,
+  retention, optional redaction and JSON/Markdown/CSV export.
+  See [docs/sessions-and-transcripts.md](docs/sessions-and-transcripts.md).
+- **Dashboard** with sessions, turns, tokens, failovers and provider latency.
 - **Request log** (timings, attempts, token usage; never message content).
 - Admin console with Basic auth, dark/light themes and a Ctrl+K command palette
   (screenshots in [docs/screenshots](docs/screenshots/README.md)).
