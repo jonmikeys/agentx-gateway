@@ -36,7 +36,7 @@ test.describe("with credentials", () => {
     await page.getByRole("link", { name: "Sessions" }).click();
     await expect(page).toHaveURL(/\/sessions$/);
     await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
-    await expect(page.getByText("Coming in G3")).toBeVisible();
+    await expect(page.getByLabel("Search transcripts")).toBeVisible();
   });
 
   test("opens the command palette with Ctrl+K", async ({ page }) => {

@@ -1,5 +1,8 @@
-import { PagePlaceholder } from "@/components/app-shell/page-placeholder";
+import { DashboardView } from "@/app/(crm)/dashboard-view";
+import { getDashboardStats } from "@/server/services/dashboard";
 
-export default function Page() {
-  return <PagePlaceholder href="/" />;
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  return <DashboardView stats={await getDashboardStats()} />;
 }
