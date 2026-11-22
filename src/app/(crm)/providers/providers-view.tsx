@@ -3,7 +3,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { CircleCheck, CircleX, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { ProviderFormDialog } from "@/app/(crm)/providers/provider-form-dialog";
 import { DataTable } from "@/components/crm/data-table";
@@ -86,105 +86,102 @@ export function ProvidersView({ providers }: { providers: ProviderView[] }) {
     }
   }
 
-  const columns = useMemo<ColumnDef<ProviderView, unknown>[]>(
-    () => [
-      {
-        accessorKey: "name",
-        header: "Name",
-        cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+  const columns: ColumnDef<ProviderView, unknown>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: "base_url",
+      header: "Base URL",
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">{row.original.base_url}</span>
+      ),
+    },
+    {
+      id: "enabled",
+      header: "Enabled",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Switch
+          aria-label={`Enable ${row.original.name}`}
+          checked={row.original.enabled}
+          onCheckedChange={(checked) => toggleEnabled(row.original, checked)}
+        />
+      ),
+    },
+    {
+      id: "capabilities",
+      header: "Capabilities",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(row.original.capabilities)
+            .filter(([, on]) => on)
+            .map(([name]) => (
+              <Badge key={name} variant="outline">
+                {name}
+              </Badge>
+            ))}
+        </div>
+      ),
+    },
+    {
+      id: "circuit",
+      header: "Circuit",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const badge = circuitBadge[row.original.circuit_state];
+        return <Badge variant={badge.variant}>{badge.label}</Badge>;
       },
-      {
-        accessorKey: "base_url",
-        header: "Base URL",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs text-muted-foreground">{row.original.base_url}</span>
-        ),
-      },
-      {
-        id: "enabled",
-        header: "Enabled",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <Switch
-            aria-label={`Enable ${row.original.name}`}
-            checked={row.original.enabled}
-            onCheckedChange={(checked) => toggleEnabled(row.original, checked)}
-          />
-        ),
-      },
-      {
-        id: "capabilities",
-        header: "Capabilities",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(row.original.capabilities)
-              .filter(([, on]) => on)
-              .map(([name]) => (
-                <Badge key={name} variant="outline">
-                  {name}
-                </Badge>
-              ))}
-          </div>
-        ),
-      },
-      {
-        id: "circuit",
-        header: "Circuit",
-        enableSorting: false,
-        cell: ({ row }) => {
-          const badge = circuitBadge[row.original.circuit_state];
-          return <Badge variant={badge.variant}>{badge.label}</Badge>;
-        },
-      },
-      {
-        id: "key",
-        header: "API key",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.api_key_masked ?? "none"}</span>
-        ),
-      },
-      {
-        id: "actions",
-        header: () => <span className="sr-only">Actions</span>,
-        enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex justify-end gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={testing === row.original.id}
-              onClick={() => runTest(row.original)}
-            >
-              <Zap />
-              {testing === row.original.id ? "Testing..." : "Test connection"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Edit ${row.original.name}`}
-              onClick={() => {
-                setEditing(row.original);
-                setFormOpen(true);
-              }}
-            >
-              <Pencil />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Delete ${row.original.name}`}
-              onClick={() => setDeleting(row.original)}
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        ),
-      },
-    ],
-    [testing],
-  );
+    },
+    {
+      id: "key",
+      header: "API key",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="font-mono text-xs">{row.original.api_key_masked ?? "none"}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: () => <span className="sr-only">Actions</span>,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex justify-end gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={testing === row.original.id}
+            onClick={() => runTest(row.original)}
+          >
+            <Zap />
+            {testing === row.original.id ? "Testing..." : "Test connection"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Edit ${row.original.name}`}
+            onClick={() => {
+              setEditing(row.original);
+              setFormOpen(true);
+            }}
+          >
+            <Pencil />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Delete ${row.original.name}`}
+            onClick={() => setDeleting(row.original)}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">

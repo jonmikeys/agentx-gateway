@@ -218,7 +218,7 @@ for (const theme of themes) {
       await expect(page.getByText("won't be shown again")).toBeVisible();
       // The key differs on every run; mask the digits so regenerated images stay stable.
       await page.getByTestId("created-api-key").evaluate((node) => {
-        node.textContent = "agx_" + "x".repeat(32);
+        node.textContent = `agx_${"x".repeat(32)}`;
       });
       await save(
         page,
