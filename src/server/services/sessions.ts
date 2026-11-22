@@ -56,7 +56,7 @@ export async function resolveSession(
     .select()
     .from(sessions)
     .where(and(eq(sessions.id, headerValue), eq(sessions.apiKeyId, input.apiKeyId)));
-  if (!session || session.status !== "active") return undefined;
+  if (session?.status !== "active") return undefined;
 
   const { idle_timeout_minutes: idleMinutes } = await getSessionSettings();
   const idleMs = Date.now() - session.lastActivityAt.getTime();

@@ -152,10 +152,9 @@ function AttemptsPopover({ request }: { request: LinkedRequestView }) {
       <PopoverContent align="start" className="w-80">
         <div className="mb-2 text-sm font-medium">Failover attempts</div>
         <ol className="space-y-2 text-xs">
-          {request.attempts.map((attempt, index) => (
+          {request.attempts.map((attempt) => (
             <li
-              // Attempts have no id; their order is the identity.
-              key={`${attempt.provider_id}-${index}`}
+              key={`${attempt.provider_id}-${attempt.model}-${attempt.outcome}-${attempt.error_code ?? ""}`}
               className="flex items-start justify-between gap-2"
             >
               <span>
