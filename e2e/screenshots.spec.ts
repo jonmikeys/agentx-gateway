@@ -130,10 +130,11 @@ async function seedDemoData(): Promise<string> {
     expect(response.status()).toBe(201);
   }
 
-  const kioskExists = (await existing("api-keys")).some((key) => key.label === "Lobby kiosk");
+  // The plaintext key is only returned at creation, so the previous run's demo key was removed
+  // by resetDemoSessions() and a single fresh one is created here.
   const response = await admin.post("/api/admin/api-keys", {
     data: {
-      label: kioskExists ? "Lobby kiosk (extra)" : "Lobby kiosk",
+      label: "Lobby kiosk",
       rpm_limit: 600,
       tokens_per_day_limit: 2000000,
     },
@@ -161,6 +162,21 @@ async function converse(model: string, messages: Message[], sessionId?: string) 
   expect(response.status()).toBe(200);
   const body = await response.text();
   return { id: response.headers()["x-session-id"] as string, reply: replyText(body) };
+}
+
+/**
+ * Makes reruns idempotent: removes the sessions, request log and demo client key created by an
+ * earlier capture so they are recreated exactly once. Providers and routes are reused by name.
+ */
+async function resetDemoSessions() {
+  const database = postgres(databaseUrl, { max: 1 });
+  try {
+    await database`delete from llm_requests`;
+    await database`delete from sessions`;
+    await database`delete from api_keys where label in ('Lobby kiosk', 'Lobby kiosk (extra)')`;
+  } finally {
+    await database.end();
+  }
 }
 
 /** Seeds sessions by sending real requests, then backdates demo history for the charts. */
@@ -305,6 +321,7 @@ test.beforeAll(async () => {
     baseURL,
     httpCredentials: { username, password },
   });
+  await resetDemoSessions();
   const clientKey = await seedDemoData();
   gateway = await playwrightRequest.newContext({
     baseURL,
@@ -375,9 +392,28 @@ for (const theme of themes) {
       name: string,
       caption: string,
       fullPage: boolean,
+      keepScroll = false,
     ) {
       const file = `${name}-${theme}.png`;
-      await page.screenshot({ path: path.join(outputDir, file), fullPage });
+      // Captures start at the top unless a state deliberately scrolls to its subject.
+      if (!keepScroll) await page.evaluate(() => window.scrollTo(0, 0));
+      if (fullPage) {
+        // The sidebar is `position: fixed` and as tall as the viewport, so a native fullPage
+        // capture leaves it short. Grow the viewport to the document height instead, which is
+        // what a tall monitor would show.
+        const height = await page.evaluate(() => document.documentElement.scrollHeight);
+        const original = page.viewportSize();
+        await page.setViewportSize({ width: original?.width ?? 1440, height });
+        await page.evaluate(
+          () =>
+            new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(outputDir, file) });
+        if (original) await page.setViewportSize(original);
+      } else {
+        await page.screenshot({ path: path.join(outputDir, file) });
+      }
       captured.push({ file, caption: `${caption} (${theme} theme)` });
     }
 
@@ -519,6 +555,7 @@ for (const theme of themes) {
         "state-session-tool-card",
         "Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration",
         false,
+        true,
       );
     });
 
