@@ -93,26 +93,29 @@ export function SettingsView({ initial }: { initial: SessionSettings }) {
                 <FieldError errors={[errors.retention_days]} />
               </Field>
 
-              <Field orientation="horizontal">
-                <Controller
-                  control={control}
-                  name="redaction_enabled"
-                  render={({ field }) => (
-                    <Switch
-                      id="redaction_enabled"
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  )}
-                />
-                <div className="flex flex-col gap-1">
-                  <FieldLabel htmlFor="redaction_enabled">
-                    Redact emails and phone numbers
-                  </FieldLabel>
-                  <FieldDescription>
-                    Masks them as [email] and [phone] before a transcript is saved. It only affects
-                    new messages; stored transcripts are not rewritten.
-                  </FieldDescription>
+              <Field>
+                <div className="flex items-start gap-3">
+                  <Controller
+                    control={control}
+                    name="redaction_enabled"
+                    render={({ field }) => (
+                      <Switch
+                        id="redaction_enabled"
+                        className="mt-0.5"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    )}
+                  />
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel htmlFor="redaction_enabled">
+                      Redact emails and phone numbers
+                    </FieldLabel>
+                    <FieldDescription>
+                      Masks them as [email] and [phone] before a transcript is saved. It only
+                      affects new messages; stored transcripts are not rewritten.
+                    </FieldDescription>
+                  </div>
                 </div>
               </Field>
             </FieldGroup>

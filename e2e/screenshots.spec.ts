@@ -497,6 +497,7 @@ for (const theme of themes) {
       await page.goto(`/sessions/${demo.failoverSession}`);
       await page.getByRole("button", { name: "2 attempts" }).click();
       await expect(page.getByText("Failover attempts")).toBeVisible();
+      await page.waitForTimeout(600);
       await save(
         page,
         "state-session-failover",
@@ -547,6 +548,7 @@ for (const theme of themes) {
       await boxes.nth(1).click();
       await page.getByRole("button", { name: /^Delete 2/ }).click();
       await expect(page.getByRole("alertdialog")).toBeVisible();
+      await page.waitForTimeout(600);
       await save(
         page,
         "state-sessions-bulk-delete",
