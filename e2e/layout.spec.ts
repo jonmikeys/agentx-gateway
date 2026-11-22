@@ -19,13 +19,13 @@ const viewports = [
 const themes = ["light", "dark"] as const;
 
 const providerNames = {
-  long: "Layout QA provider with an extremely long display name that keeps going 123",
+  long: "Layout QA provider with an extremely long title that keeps going 123",
   short: "Layout QA mock",
 };
 const longBaseUrlPath = `/v1/${"a".repeat(120)}`;
-const routeSlug = "layout-qa-route-with-a-very-long-slug-for-checking-layout-1234";
+const routeSlug = "layout-qa-route-with-a-very-long-id-for-checking-layout-1234";
 const runId = Date.now().toString(36);
-const keyLabel = "Layout QA key \u{1F680} with a long label that keeps going and going on";
+const keyLabel = "Layout QA key \u{1F680} with a long text that keeps going and going on";
 
 let upstream: MockUpstream;
 
