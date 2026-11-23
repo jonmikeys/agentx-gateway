@@ -1,4 +1,11 @@
 import {
+  ANIMATION_TOOL_NAMES,
+  CAMERA_TOOL_NAMES,
+  type ClientToolRestrictions,
+  clientActionProblem,
+  MEDIA_TOOL_NAMES,
+} from "@/lib/agents/client-tools";
+import {
   type FlowGraph,
   type FlowNode,
   flowNodeSchema,
@@ -17,6 +24,9 @@ export interface ValidationResult {
   valid: boolean;
   problems: ValidationProblem[];
 }
+
+/** Resolved agent allow-lists used to validate Client Action references. */
+export type ValidationRestrictions = ClientToolRestrictions;
 
 const TERMINAL_TYPES: readonly NodeType[] = ["reply", "end"];
 
@@ -176,13 +186,72 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
   return problems;
 }
 
+function restrictionProblems(
+  graph: FlowGraph,
+  restrictions: ValidationRestrictions | undefined,
+): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  for (const node of graph.nodes) {
+    if (node.type !== "client_action") continue;
+    const title = node.data.title;
+    let args: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(node.data.argsTemplate.trim() || "{}") as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        problems.push({
+          nodeId: node.id,
+          nodeTitle: title,
+          message: "Arguments must be a JSON object",
+        });
+        continue;
+      }
+      args = parsed as Record<string, unknown>;
+    } catch {
+      // Templates are interpolated at run time; only literal JSON can be checked here.
+      continue;
+    }
+    const required = MEDIA_TOOL_NAMES.has(node.data.toolName)
+      ? "media_id"
+      : CAMERA_TOOL_NAMES.has(node.data.toolName)
+        ? "camera_id"
+        : ANIMATION_TOOL_NAMES.has(node.data.toolName)
+          ? "animation_id"
+          : undefined;
+    if (required && (typeof args[required] !== "string" || args[required] === "")) {
+      problems.push({
+        nodeId: node.id,
+        nodeTitle: title,
+        message: `Choose a ${required.replace("_id", "")} for this Client Action`,
+      });
+      continue;
+    }
+    const problem = clientActionProblem(
+      node.data.toolName,
+      args,
+      restrictions ?? {
+        mediaIds: null,
+        cameraIds: null,
+      },
+    );
+    if (problem) problems.push({ nodeId: node.id, nodeTitle: title, message: problem });
+  }
+  return problems;
+}
+
 /**
  * Publish-time validation (spec §13): schema-valid nodes, exactly one Start, every path reaches a
  * Reply or End, no orphans, no cycles except edges marked `loop`. Returns per-node problems so the
  * CRM can badge the offending cards.
  */
-export function validateGraph(graph: FlowGraph): ValidationResult {
-  const problems = [...schemaProblems(graph), ...structuralProblems(graph, buildAdjacency(graph))];
+export function validateGraph(
+  graph: FlowGraph,
+  restrictions?: ValidationRestrictions,
+): ValidationResult {
+  const problems = [
+    ...schemaProblems(graph),
+    ...structuralProblems(graph, buildAdjacency(graph)),
+    ...restrictionProblems(graph, restrictions),
+  ];
   return { valid: problems.length === 0, problems };
 }
 

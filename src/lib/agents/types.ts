@@ -71,6 +71,8 @@ export interface RunTrace {
   error?: string;
   /** Node whose execution was in flight when the run failed. */
   failed_node_id?: string | null;
+  /** True when the run stopped at a client-tool interrupt and waits for the client. */
+  paused?: boolean;
 }
 
 /** One `session_memory` row as shown by the transcript viewer. */

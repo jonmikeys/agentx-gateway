@@ -15,6 +15,7 @@ export const NODE_TYPES = [
   "webhook",
   "memory",
   "mcp_tool",
+  "client_action",
   "reply",
   "end",
 ] as const;
@@ -52,6 +53,13 @@ export const llmNodeDataSchema = z.object({
   historyLimit: z.coerce.number().int().min(1).max(100).default(10),
   /** Allowed MCP tool ids offered to this node (a subset of the registry). */
   mcpToolIds: z.array(z.uuid()).max(50).default([]),
+  /** Which of the client's request tools this node offers (spec §13, Unity tools inside agents). */
+  clientTools: z
+    .object({
+      mode: z.enum(["none", "all", "subset"]).default("none"),
+      names: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+    })
+    .default({ mode: "none", names: [] }),
   outputVariable: variableNameSchema.default("llm_output"),
   /** Stream to the client when the node is terminal; non-terminal nodes still collect the text. */
   stream: z.boolean().default(true),
@@ -158,6 +166,15 @@ export const mcpToolNodeDataSchema = z.object({
   outputVariable: variableNameSchema.default("mcp_output"),
 });
 
+/** Client Action: emits one fixed Unity tool call with no LLM, then pauses for the result. */
+export const clientActionNodeDataSchema = z.object({
+  ...common,
+  toolName: z.string().trim().min(1, "Choose a client tool").max(120).default("show_image"),
+  /** JSON object template; `{{…}}` paths are interpolated before parsing. */
+  argsTemplate: z.string().max(8000).default("{}"),
+  outputVariable: variableNameSchema.default("client_result"),
+});
+
 export const replyNodeDataSchema = z.object({
   ...common,
   template: z.string().min(1, "Reply text is required").max(20_000),
@@ -179,6 +196,7 @@ export const flowNodeSchema = z.discriminatedUnion("type", [
   z.object({ ...nodeBase, type: z.literal("webhook"), data: webhookNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("memory"), data: memoryNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("mcp_tool"), data: mcpToolNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("client_action"), data: clientActionNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("reply"), data: replyNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("end"), data: endNodeDataSchema }),
 ]);
@@ -209,11 +227,18 @@ export type WebhookNodeData = z.infer<typeof webhookNodeDataSchema>;
 export type SetVariableNodeData = z.infer<typeof setVariableNodeDataSchema>;
 export type MemoryNodeData = z.infer<typeof memoryNodeDataSchema>;
 export type McpToolNodeData = z.infer<typeof mcpToolNodeDataSchema>;
+export type ClientActionNodeData = z.infer<typeof clientActionNodeDataSchema>;
 export type ReplyNodeData = z.infer<typeof replyNodeDataSchema>;
 
 /** Node types whose execution can fail and that therefore expose an `error` output handle. */
 export function isFallibleNode(type: NodeType): boolean {
-  return type === "llm" || type === "router" || type === "webhook" || type === "mcp_tool";
+  return (
+    type === "llm" ||
+    type === "router" ||
+    type === "webhook" ||
+    type === "mcp_tool" ||
+    type === "client_action"
+  );
 }
 
 /** One labelled output handle of a node; `id` is what edges use as `sourceHandle`. */
@@ -309,6 +334,7 @@ export const nodeCatalog: NodeCatalogEntry[] = [
       history: "full",
       historyLimit: 10,
       mcpToolIds: [],
+      clientTools: { mode: "none", names: [] },
       outputVariable: "llm_output",
       stream: true,
     }),
@@ -366,6 +392,19 @@ export const nodeCatalog: NodeCatalogEntry[] = [
       toolName: "",
       args: [],
       outputVariable: "mcp_output",
+    }),
+  },
+  {
+    type: "client_action",
+    label: "Client Action",
+    group: "Actions",
+    description:
+      "Emits a Unity tool call (show media, camera, animation) and waits for its result.",
+    defaultData: () => ({
+      title: "Client Action",
+      toolName: "show_image",
+      argsTemplate: '{\n  "media_id": ""\n}',
+      outputVariable: "client_result",
     }),
   },
   {
@@ -461,6 +500,8 @@ export function summarizeNode(node: FlowNode): string {
       return `${node.data.operation} ${node.data.key}`;
     case "mcp_tool":
       return node.data.toolName ? `${node.data.toolName}` : "No tool selected";
+    case "client_action":
+      return `${node.data.toolName} · waits for the client`;
     case "reply":
       return node.data.template.replace(/\{\{[^}]*\}\}/g, "…").slice(0, 80) || "Empty reply";
     case "end":

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { FlowCreateInput, FlowUpdateInput } from "@/lib/agent-schemas";
+import type { ClientToolRestrictions } from "@/lib/agents/client-tools";
 import { type FlowGraph, type FlowNode, flowGraphSchema, starterGraph } from "@/lib/agents/graph";
 import {
   DEFAULT_FLOW_SETTINGS,
@@ -13,7 +14,7 @@ import {
 import { type ValidationProblem, validateGraph } from "@/lib/agents/validate";
 import { decryptSecret, encryptSecret, maskSecret } from "@/server/crypto/secrets";
 import { getDb } from "@/server/db/client";
-import { flows, flowVersions, flowWebhookSecrets } from "@/server/db/schema";
+import { flows, flowVersions, flowWebhookSecrets, mediaItems } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/errors";
 
 const FLOW_ID_PATTERN = /^agt_[a-f0-9]{12}$/;
@@ -54,6 +55,28 @@ function normalizeSettings(
     allowed_media_tags: input?.allowed_media_tags ?? base.allowed_media_tags,
     allowed_cameras: input?.allowed_cameras ?? base.allowed_cameras,
   };
+}
+
+/**
+ * Resolves the agent's allowed media/camera sets into ids for the runtime and validation.
+ * `null` means the agent does not restrict that catalogue; an empty array means nothing matches.
+ */
+export async function resolveAgentRestrictions(
+  settings: FlowSettings,
+): Promise<ClientToolRestrictions> {
+  let mediaIds: string[] | null = null;
+  const tags = settings.allowed_media_tags ?? [];
+  if (tags.length > 0) {
+    const rows = await getDb()
+      .select({ id: mediaItems.id, tags: mediaItems.tags, enabled: mediaItems.enabled })
+      .from(mediaItems);
+    const allowed = new Set(tags);
+    mediaIds = rows
+      .filter((row) => row.enabled && row.tags.some((tag) => allowed.has(tag)))
+      .map((row) => row.id);
+  }
+  const cameras = settings.allowed_cameras ?? [];
+  return { mediaIds, cameraIds: cameras.length > 0 ? [...cameras] : null };
 }
 
 /** Removes write-only values and display masks before a graph is persisted. */
@@ -339,7 +362,8 @@ export interface PublishResult {
 /** Validates the draft and stores the next immutable version. */
 export async function publishFlow(id: string, note: string): Promise<PublishResult> {
   const row = await findRow(id);
-  const validation = validateGraph(row.draft);
+  const restrictions = await resolveAgentRestrictions(normalizeSettings(row.settings));
+  const validation = validateGraph(row.draft, restrictions);
   if (!validation.valid) {
     throw new ServiceError(
       400,
@@ -370,8 +394,10 @@ export async function validateFlowDraft(
   id: string,
   graph?: FlowGraph,
 ): Promise<{ valid: boolean; problems: ValidationProblem[] }> {
-  const draft = graph ?? (await findRow(id)).draft;
-  return validateGraph(draft);
+  const row = await findRow(id);
+  const draft = graph ?? row.draft;
+  const restrictions = await resolveAgentRestrictions(normalizeSettings(row.settings));
+  return validateGraph(draft, restrictions);
 }
 
 function toVersionSummary(row: VersionRow, graph: FlowGraph): FlowVersionSummary {

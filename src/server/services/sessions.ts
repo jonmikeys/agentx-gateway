@@ -217,7 +217,7 @@ export async function persistRequest(
         toolName:
           item.toolName ?? (item.toolCallId ? (toolNames.get(item.toolCallId) ?? null) : null),
         toolArgs: item.kind === "tool_call" ? cleanValue(item.toolArgs ?? null) : null,
-        toolSource: item.kind === "tool_call" ? "client" : null,
+        toolSource: item.kind === "tool_call" || item.kind === "tool_result" ? "client" : null,
       });
     }
 

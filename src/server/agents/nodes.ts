@@ -1,3 +1,16 @@
+import { randomUUID } from "node:crypto";
+import {
+  type ClientToolCall,
+  type ClientToolDefinition,
+  type ClientToolRestrictions,
+  type ClientToolResult,
+  parseToolResultContent,
+  renderClientActionArgs,
+  restrictClientTools,
+  selectClientTools,
+  toolResultFailed,
+  UNRESTRICTED,
+} from "@/lib/agents/client-tools";
 import { type FlowGraph, type FlowNode, isFallibleNode, nodeHandles } from "@/lib/agents/graph";
 import { renderTemplate, resolvePath, type TemplateScope } from "@/lib/agents/templates";
 import type { RunTraceStep } from "@/lib/agents/types";
@@ -26,6 +39,12 @@ export interface AgentState {
   lastError?: string;
   fatal: boolean;
   failedNodeId: string | null;
+  /** Node whose client tool calls are waiting for the client (empty when none). */
+  pendingClientNode: string;
+  pendingClientCalls: ClientToolCall[];
+  /** Tool results delivered by the resuming request, consumed by their originating node. */
+  clientResults: ClientToolResult[];
+  clientResultsNode: string;
 }
 
 export interface AgentDependencies {
@@ -52,6 +71,10 @@ export interface AgentRunContext {
   terminalLlmNodes: Set<string>;
   route: ResolvedRoute | undefined;
   deps: AgentDependencies;
+  /** Function tools the Unity client sent with the request (G7b). */
+  clientTools?: ClientToolDefinition[];
+  /** Resolved media/camera allow-lists for narrowing the offered client tool enums. */
+  clientRestrictions?: ClientToolRestrictions;
   emitText: (delta: string) => void;
   /** Live node lifecycle events for the CRM test drawer and streaming callers. */
   onNodeStart?: (node: FlowNode) => void;
@@ -65,6 +88,14 @@ export interface NodeOutcome {
   vars?: Record<string, unknown>;
   memory?: Record<string, unknown>;
   output?: unknown;
+  /** Conversation accumulated by an LLM node, persisted so a resumed run continues from it. */
+  messages?: unknown[];
+  /** Set when the node paused for client tool results; the compiler routes to the wait node. */
+  pendingClientNode?: string;
+  pendingClientCalls?: ClientToolCall[];
+  /** Cleared when a node consumes the resumed results. */
+  clientResults?: ClientToolResult[];
+  clientResultsNode?: string;
   /** Text emitted to the client this node; appended to the run reply. */
   emittedText?: string;
   reasoning?: string;
@@ -179,22 +210,41 @@ async function executeLlm(
       `Model route "${node.data.model}" does not exist or is disabled.`,
     );
   }
-  const tools = await context.deps.mcpToolsByIds(node.data.mcpToolIds);
-  const streaming = tools.length === 0 && node.data.stream && context.terminalLlmNodes.has(node.id);
-  let messages = historyMessages(state, node, context);
+  const mcpTools = await context.deps.mcpToolsByIds(node.data.mcpToolIds);
+  const mcpNames = new Set(mcpTools.map((tool) => tool.exposedName));
+  const offered = restrictClientTools(
+    selectClientTools(context.clientTools ?? [], node.data.clientTools),
+    context.clientRestrictions ?? UNRESTRICTED,
+  ).filter((tool) => !mcpNames.has(tool.function.name));
+  const clientByName = new Map(offered.map((tool) => [tool.function.name, tool]));
+  const hasTools = mcpTools.length > 0 || offered.length > 0;
+  const streaming = !hasTools && node.data.stream && context.terminalLlmNodes.has(node.id);
+
+  const resuming = state.clientResultsNode === node.id && state.clientResults.length > 0;
+  let messages = resuming ? [...state.messages] : historyMessages(state, node, context);
+  if (resuming) {
+    for (const result of state.clientResults) {
+      messages.push({ role: "tool", tool_call_id: result.toolCallId, content: result.content });
+    }
+  }
+  const clearResults = resuming
+    ? { clientResults: [] as ClientToolResult[], clientResultsNode: "" }
+    : {};
+
+  const mcpByName = new Map(mcpTools.map((tool) => [tool.exposedName, tool]));
+  const toolList = hasTools ? [...toolDefinitions(mcpTools), ...offered] : undefined;
   let usageText = "";
   let reasoning = "";
   let usage: TokenUsage | undefined;
-  const toolsByName = new Map(tools.map((tool) => [tool.exposedName, tool]));
 
-  const rounds = tools.length > 0 ? 4 : 1;
+  const rounds = hasTools ? 4 : 1;
   for (let round = 0; round < rounds; round += 1) {
     const isLast = round === rounds - 1;
     const result = await chatThroughRoute({
       route,
       messages,
-      tools: tools.length > 0 ? toolDefinitions(tools) : undefined,
-      toolChoice: tools.length > 0 ? (isLast ? "none" : "auto") : undefined,
+      tools: toolList,
+      toolChoice: hasTools ? (isLast ? "none" : "auto") : undefined,
       stream: streaming,
       signal: context.signal,
       fetchImpl: context.deps.fetchImpl,
@@ -203,8 +253,10 @@ async function executeLlm(
     reasoning += result.reasoning;
     usage = addUsage(usage, result.usage);
     usageText = result.text;
-    const calls = result.toolCalls.filter((call) => call.name && toolsByName.has(call.name));
-    if (calls.length === 0 || tools.length === 0 || isLast) break;
+    const calls = result.toolCalls.filter(
+      (call) => call.name && (mcpByName.has(call.name) || clientByName.has(call.name)),
+    );
+    if (calls.length === 0 || !hasTools || isLast) break;
 
     const assistantCalls = calls.map((call, index) => ({
       id: call.id ?? `call_${round}_${index}`,
@@ -212,8 +264,18 @@ async function executeLlm(
       function: { name: call.name ?? "", arguments: call.rawArguments || "{}" },
     }));
     const toolMessages: unknown[] = [];
+    const pendingCalls: ClientToolCall[] = [];
     for (const [index, call] of calls.entries()) {
-      const tool = call.name ? toolsByName.get(call.name) : undefined;
+      const name = call.name ?? "";
+      if (clientByName.has(name)) {
+        pendingCalls.push({
+          id: assistantCalls[index].id,
+          name,
+          arguments: call.rawArguments || JSON.stringify(call.args ?? {}),
+        });
+        continue;
+      }
+      const tool = mcpByName.get(name);
       if (!tool) continue;
       const args =
         typeof call.args === "object" && call.args !== null
@@ -226,27 +288,38 @@ async function executeLlm(
       } catch (error) {
         content = `Error: ${error instanceof Error ? error.message : "MCP call failed"}`;
       }
-      toolMessages.push({
-        role: "tool",
-        tool_call_id: assistantCalls[index]?.id ?? `call_${round}_${index}`,
-        content,
-      });
+      toolMessages.push({ role: "tool", tool_call_id: assistantCalls[index].id, content });
     }
     messages = [
       ...messages,
       { role: "assistant", content: result.text || null, tool_calls: assistantCalls },
       ...toolMessages,
     ];
+    if (pendingCalls.length > 0) {
+      return {
+        messages,
+        vars: { [node.data.outputVariable]: usageText },
+        output: usageText,
+        reasoning,
+        usage,
+        next: "out",
+        pendingClientNode: node.id,
+        pendingClientCalls: pendingCalls,
+        ...clearResults,
+      };
+    }
   }
 
-  const emitted = streaming ? usageText : undefined;
+  const terminal = node.data.stream && context.terminalLlmNodes.has(node.id);
   return {
+    messages,
     vars: { [node.data.outputVariable]: usageText },
     output: usageText,
-    emittedText: emitted,
+    emittedText: streaming || terminal ? usageText : undefined,
     reasoning,
     usage,
     next: "out",
+    ...clearResults,
   };
 }
 
@@ -476,6 +549,46 @@ async function executeMcpTool(
   };
 }
 
+/**
+ * Client Action: emits one fixed Unity tool call and pauses for the result, or (when resumed)
+ * stores the result in its variable and follows `error` when the client reported `ok: false`.
+ */
+async function executeClientAction(
+  node: Extract<FlowNode, { type: "client_action" }>,
+  state: AgentState,
+  context: AgentRunContext,
+): Promise<NodeOutcome> {
+  const resuming = state.clientResultsNode === node.id && state.clientResults.length > 0;
+  if (resuming) {
+    const result = state.clientResults[0];
+    const parsed = parseToolResultContent(result.content);
+    return {
+      vars: { [node.data.outputVariable]: parsed },
+      output: parsed,
+      next: toolResultFailed(result.content) ? "error" : "out",
+      clientResults: [],
+      clientResultsNode: "",
+    };
+  }
+
+  const rendered = renderClientActionArgs(
+    node.data.argsTemplate,
+    templateScope(state, context.inputText),
+  );
+  if (!rendered.ok) throw new AgentRuntimeError("client_action_invalid_args", rendered.error);
+  const call: ClientToolCall = {
+    id: `call_${randomUUID()}`,
+    name: node.data.toolName,
+    arguments: JSON.stringify(rendered.value),
+  };
+  return {
+    output: { tool: call.name, arguments: rendered.value },
+    next: "out",
+    pendingClientNode: node.id,
+    pendingClientCalls: [call],
+  };
+}
+
 async function executeReply(
   node: Extract<FlowNode, { type: "reply" }>,
   state: AgentState,
@@ -507,6 +620,8 @@ export async function executeNode(
       return executeMemory(node, state, context);
     case "mcp_tool":
       return executeMcpTool(node, state, context);
+    case "client_action":
+      return executeClientAction(node, state, context);
     case "reply":
       return executeReply(node, state, context);
     case "end":

@@ -31,6 +31,10 @@ function state(overrides: Partial<AgentState> = {}): AgentState {
     lastError: "",
     fatal: false,
     failedNodeId: null,
+    pendingClientNode: "",
+    pendingClientCalls: [],
+    clientResults: [],
+    clientResultsNode: "",
     ...overrides,
   };
 }
