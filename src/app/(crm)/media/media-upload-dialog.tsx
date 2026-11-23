@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { allowedMediaTypes, formatBytes } from "@/server/media/types";
+import { allowedMediaTypes, findMediaType, formatBytes } from "@/server/media/types";
 
 type UploadState = "ready" | "uploading" | "done" | "error";
 
@@ -31,7 +31,7 @@ const acceptedTypes = Object.keys(allowedMediaTypes).join(",");
 
 /** Early, advisory check from the browser's idea of the type; the server checks the bytes. */
 function validateFile(file: File): string | undefined {
-  const type = allowedMediaTypes[file.type];
+  const type = findMediaType(file.type);
   if (!type) return "Not a PNG, JPEG, GIF, WebP, MP4 or WebM file";
   if (file.size > type.maxBytes) {
     return `Too large: ${formatBytes(file.size)} (${type.kind}s up to ${formatBytes(type.maxBytes)})`;
@@ -173,9 +173,7 @@ export function MediaUploadDialog({
           >
             <FileUp className="size-6 text-muted-foreground" />
             <span className="font-medium">Drop files here or click to choose</span>
-            <span className="text-xs text-muted-foreground">
-              PNG, JPEG, GIF, WebP, MP4 or WebM
-            </span>
+            <span className="text-xs text-muted-foreground">PNG, JPEG, GIF, WebP, MP4 or WebM</span>
           </button>
           <input
             ref={inputRef}
@@ -200,7 +198,9 @@ export function MediaUploadDialog({
                   className="flex min-w-0 flex-col gap-1 rounded-lg border p-2 text-sm"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    {entry.state === "done" && <CircleCheck className="size-4 shrink-0 text-primary" />}
+                    {entry.state === "done" && (
+                      <CircleCheck className="size-4 shrink-0 text-primary" />
+                    )}
                     {entry.state === "error" && (
                       <CircleAlert className="size-4 shrink-0 text-destructive" />
                     )}
@@ -264,7 +264,12 @@ export function MediaUploadDialog({
           </Field>
         </FieldGroup>
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+          >
             {allDone ? "Close" : "Cancel"}
           </Button>
           <Button type="button" disabled={busy || readyCount === 0} onClick={startUpload}>

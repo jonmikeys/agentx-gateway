@@ -9,6 +9,7 @@ import {
 import postgres from "postgres";
 import { navGroups } from "../src/components/app-shell/nav";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
+import { type MediaSeed, seedMediaAndCameras } from "./media-seed";
 
 /**
  * Repeatable CRM screenshots (`pnpm screenshots`): every page in nav.ts plus key states,
@@ -26,6 +27,8 @@ const databaseUrl =
   process.env.E2E_DATABASE_URL ??
   process.env.DATABASE_URL ??
   "postgres://agentx:agentx@localhost:5432/agentx";
+const MOCK_MJPEG_PORT = Number(process.env.MOCK_MJPEG_PORT ?? 4020);
+const MOCK_VIDEO_PORT = Number(process.env.MOCK_VIDEO_PORT ?? 4030);
 const themes = ["light", "dark"] as const;
 
 interface Captured {
@@ -35,6 +38,7 @@ interface Captured {
 const captured: Captured[] = [];
 
 let upstream: MockUpstream;
+let mediaSeed: MediaSeed;
 let admin: APIRequestContext;
 let gateway: APIRequestContext;
 const demo = {
@@ -360,12 +364,14 @@ test.beforeAll(async () => {
     extraHTTPHeaders: { Authorization: `Bearer ${clientKey}` },
   });
   await seedSessions();
+  mediaSeed = await seedMediaAndCameras(admin, { mjpeg: MOCK_MJPEG_PORT, video: MOCK_VIDEO_PORT });
 });
 
 test.afterAll(async () => {
   await admin.dispose();
   await gateway.dispose();
   await upstream.close();
+  await mediaSeed.close();
   const lines = [
     "# CRM screenshots",
     "",
@@ -412,6 +418,17 @@ for (const theme of themes) {
       captured.push({ file, caption: `${caption} (${theme} theme)` });
     }
 
+    async function waitForMediaLoaded(page: import("@playwright/test").Page) {
+      await expect(page.getByTestId("media-card").first()).toBeVisible();
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll("img")].every(
+            (img) => img.complete && img.naturalWidth > 0,
+          ) && [...document.querySelectorAll("video")].every((video) => video.readyState >= 2),
+      );
+      await page.waitForTimeout(300);
+    }
+
     for (const group of navGroups) {
       for (const navPage of group.pages) {
         test(`page ${group.id} / ${navPage.title}`, async ({ page }) => {
@@ -421,6 +438,7 @@ for (const theme of themes) {
             await expect(page.getByRole("link", { name: /UTC$/ }).first()).toBeVisible();
           }
           await settle(page);
+          if (navPage.href === "/media") await waitForMediaLoaded(page);
           await save(
             page,
             `${group.id}-${slugify(navPage.title)}`,
@@ -626,6 +644,72 @@ for (const theme of themes) {
         false,
       );
       await page.getByRole("button", { name: "Cancel" }).click();
+    });
+
+    test("state: media upload dialog", async ({ page }) => {
+      await page.goto("/media");
+      await settle(page);
+      await page.getByRole("button", { name: "Upload media" }).first().click();
+      await page.getByTestId("media-file-input").setInputFiles([
+        { name: "reception-desk.png", mimeType: "image/png", buffer: Buffer.alloc(300_000, 1) },
+        { name: "welcome-loop.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(2_400_000, 2) },
+        { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not media") },
+      ]);
+      await expect(page.getByRole("alert")).toBeVisible();
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-media-upload-dialog",
+        "Media: upload dialog with drag-and-drop, queued files, limits and a rejected file",
+        false,
+      );
+    });
+
+    test("state: media edit dialog", async ({ page }) => {
+      await page.goto("/media");
+      await settle(page);
+      await waitForMediaLoaded(page);
+      await page.getByRole("button", { name: "Edit Sunset" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-media-edit-dialog",
+        "Media: edit dialog (the description is what the model uses to choose; tags select media per agent)",
+        false,
+      );
+    });
+
+    test("state: camera dialog", async ({ page }) => {
+      await page.goto("/cameras");
+      await settle(page);
+      await page.getByRole("button", { name: "Edit Lobby camera" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-camera-dialog",
+        "Cameras: edit dialog for an MJPEG camera (credentials are write-only: only the masked username shows)",
+        false,
+      );
+    });
+
+    test("state: camera preview", async ({ page }) => {
+      await page.goto("/cameras");
+      await settle(page);
+      await page.getByRole("button", { name: "Preview Lobby camera" }).click();
+      const image = page.getByRole("img", { name: /Live preview/ });
+      await expect(image).toBeVisible();
+      await expect
+        .poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth))
+        .toBeGreaterThan(0);
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-camera-preview",
+        "Cameras: live MJPEG preview through the admin-only proxy (Unity connects directly)",
+        false,
+      );
     });
 
     test("state: command palette", async ({ page }) => {

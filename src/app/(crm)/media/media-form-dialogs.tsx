@@ -141,7 +141,9 @@ export function MediaEditDialog({
                   />
                   <FieldContent>
                     <FieldLabel htmlFor="media-enabled">Enabled</FieldLabel>
-                    <FieldDescription>Disabled items are hidden from the client API.</FieldDescription>
+                    <FieldDescription>
+                      Disabled items are hidden from the client API.
+                    </FieldDescription>
                   </FieldContent>
                 </Field>
               )}

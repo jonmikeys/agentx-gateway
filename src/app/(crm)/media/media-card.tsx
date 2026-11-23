@@ -11,7 +11,6 @@ import type { MediaView } from "@/server/services/media";
 export function MediaThumbnail({ item, className }: { item: MediaView; className?: string }) {
   if (item.kind === "image") {
     return (
-      // biome-ignore lint/performance/noImgElement: previews stream from the admin API, not next/image
       <img
         src={item.preview_url}
         alt=""
