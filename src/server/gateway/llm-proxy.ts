@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { openAIError } from "@/server/api/errors";
 import type { LlmApi, RequestAttempt, TokenUsage } from "@/server/db/schema";
 import { type CircuitBreaker, circuitBreaker } from "@/server/gateway/circuit-breaker";
@@ -769,7 +769,7 @@ async function executeMcpCalls(
   };
 }
 
-function syntheticCompletion(
+export function syntheticCompletion(
   captured: CapturedResponse,
   model: string,
   usage: TokenUsage | undefined,
@@ -817,7 +817,7 @@ function chatChunk(
 }
 
 /** SSE frames for a chat client, synthesised from the final captured reply. */
-function chatStreamFrames(
+export function chatStreamFrames(
   captured: CapturedResponse,
   model: string,
   usage: TokenUsage | undefined,
@@ -862,7 +862,7 @@ function eventFrame(event: ResponseEvent): string {
 }
 
 /** SSE frames for a Responses client: translator input is the synthetic chat completion. */
-function responsesStreamFrames(
+export function responsesStreamFrames(
   captured: CapturedResponse,
   model: string,
   usage: TokenUsage | undefined,

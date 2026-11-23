@@ -20,4 +20,5 @@ export const encryptedColumns: EncryptedColumn[] = [
   { table: "providers", column: "extra_headers", primaryKey: ["id"] },
   { table: "cameras", column: "credentials", primaryKey: ["id"] },
   { table: "mcp_servers", column: "headers", primaryKey: ["id"] },
+  { table: "flow_webhook_secrets", column: "value", primaryKey: ["flow_id", "node_id", "name"] },
 ];

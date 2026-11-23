@@ -118,10 +118,18 @@ type NewItem = typeof transcriptItems.$inferInsert;
  * request row and the turn bookkeeping, in one transaction. Locks the session row so
  * concurrent requests number their items consistently.
  */
-export async function persistRequest(input: PersistTurnInput): Promise<void> {
+export interface PersistedRequest {
+  turnId: string;
+  requestId: string;
+}
+
+export async function persistRequest(
+  input: PersistTurnInput,
+): Promise<PersistedRequest | undefined> {
   const { redaction_enabled: redact } = await getSessionSettings();
   const clean = (text: string) => (redact ? redactText(text) : text);
   const cleanValue = (value: unknown) => (redact ? redactValue(value) : value);
+  let persisted: PersistedRequest | undefined;
 
   await getDb().transaction(async (tx) => {
     const [session] = await tx
@@ -267,5 +275,7 @@ export async function persistRequest(input: PersistTurnInput): Promise<void> {
         systemPromptHash: promptHash ?? session.systemPromptHash,
       })
       .where(eq(sessions.id, input.sessionId));
+    persisted = { turnId, requestId };
   });
+  return persisted;
 }

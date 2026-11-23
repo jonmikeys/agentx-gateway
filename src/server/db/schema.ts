@@ -12,6 +12,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { FlowGraph, FlowKind } from "../../lib/agents/graph";
+import type { FlowSettings, RunTrace } from "../../lib/agents/types";
 
 /** Key/value settings (idle timeout, retention, ...). Populated by later stages. */
 export const settings = pgTable("settings", {
@@ -376,3 +378,100 @@ export const cameras = pgTable("cameras", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Agents (published chatflows) and subflows. `draft` is the autosaved React Flow graph; published
+ * versions are immutable rows in `flow_versions`. `slug` is fixed once a version exists.
+ * `published_version` mirrors the highest published version for cheap listing.
+ */
+export const flows = pgTable(
+  "flows",
+  {
+    /** `agt_` + 12 hex characters, stable across versions (Unity sends it as `agent_id`). */
+    id: text("id").primaryKey(),
+    kind: text("kind").$type<FlowKind>().notNull().default("agent"),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    description: text("description").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    settings: jsonb("settings")
+      .$type<FlowSettings>()
+      .notNull()
+      .default({ default_route_slug: null, allowed_media_tags: [], allowed_cameras: [] }),
+    draft: jsonb("draft").$type<FlowGraph>().notNull(),
+    draftUpdatedAt: timestamp("draft_updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Highest published version; null until the first publish. */
+    publishedVersion: integer("published_version"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("flows_enabled_idx").on(table.enabled)],
+);
+
+/** One immutable published graph per (flow, version). */
+export const flowVersions = pgTable(
+  "flow_versions",
+  {
+    flowId: text("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    graph: jsonb("graph").$type<FlowGraph>().notNull(),
+    note: text("note").notNull().default(""),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.flowId, table.version] })],
+);
+
+/**
+ * Webhook header values live outside the graph so they are encrypted at rest and covered by key
+ * rotation; the graph only stores header names. One row per (flow, node, header).
+ */
+export const flowWebhookSecrets = pgTable(
+  "flow_webhook_secrets",
+  {
+    flowId: text("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    nodeId: text("node_id").notNull(),
+    name: text("name").notNull(),
+    /** AES-256-GCM blob (encryptSecret); registered in encrypted-columns.ts. */
+    value: text("value").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.flowId, table.nodeId, table.name] })],
+);
+
+/** Per-node trace of one agent run, linked from the transcript by session and turn. */
+export const runLogs = pgTable(
+  "run_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+    turnId: uuid("turn_id").references(() => turns.id, { onDelete: "cascade" }),
+    flowId: text("flow_id").references(() => flows.id, { onDelete: "set null" }),
+    version: integer("version"),
+    trace: jsonb("trace").$type<RunTrace>(),
+    status: text("status").$type<"ok" | "error">().notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    durationMs: integer("duration_ms"),
+  },
+  (table) => [
+    index("run_logs_session_idx").on(table.sessionId),
+    index("run_logs_turn_idx").on(table.turnId),
+  ],
+);
+
+/** Session-scoped memory written by Memory nodes and shown in the transcript viewer. */
+export const sessionMemory = pgTable(
+  "session_memory",
+  {
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").$type<unknown>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.key] })],
+);

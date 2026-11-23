@@ -1,10 +1,11 @@
-"use client";
+﻿"use client";
 
 import { ArrowLeft, Download, FileText, OctagonX, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AgentRunList, SessionMemoryPanel } from "@/components/sessions/agent-runs";
 import { SessionStatusBadge } from "@/components/sessions/status-badge";
 import { Transcript } from "@/components/sessions/transcript";
 import {
@@ -164,17 +165,23 @@ export function SessionDetailView({ initial }: { initial: SessionDetail }) {
           <CardHeader>
             <CardTitle>Agent run trace</CardTitle>
             <CardDescription>
-              Per-node traces of agent runs appear here once agents ship (stage G7).
+              Per-node inputs, outputs, timings and errors for every agent run of this session.
             </CardDescription>
           </CardHeader>
+          <CardContent>
+            <AgentRunList runs={session.run_logs} />
+          </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle>Session memory</CardTitle>
             <CardDescription>
-              Variables and memory keys of an agent session appear here once agents ship (stage G7).
+              Values Memory nodes keep across the turns of this session.
             </CardDescription>
           </CardHeader>
+          <CardContent>
+            <SessionMemoryPanel memory={session.memory} />
+          </CardContent>
         </Card>
       </div>
 

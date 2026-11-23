@@ -1,5 +1,7 @@
 /** JSON shapes of the sessions admin API, shared by the services and the CRM (no server imports). */
 
+import type { RunLogView, SessionMemoryView } from "@/lib/agents/types";
+
 export type SessionStatus = "active" | "expired" | "ended";
 
 export type TranscriptItemKind =
@@ -86,6 +88,10 @@ export interface TurnView {
 export interface SessionDetail extends SessionSummary {
   system_prompt_hash: string | null;
   turns: TurnView[];
+  /** Agent runs of this session (newest first) with their per-node traces. */
+  run_logs: RunLogView[];
+  /** Session memory written by Memory nodes, sorted by key. */
+  memory: SessionMemoryView[];
 }
 
 export interface SessionListResponse {
