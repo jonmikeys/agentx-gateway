@@ -2,6 +2,7 @@
 
 import { Film, ImageIcon, Pencil, Play, Trash2 } from "lucide-react";
 import Image from "next/image";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -88,26 +89,22 @@ export function MediaCard({
       </button>
       <div className="flex min-w-0 flex-1 flex-col gap-2 p-3">
         <div className="flex min-w-0 items-start justify-between gap-2">
-          <h2 className="min-w-0 truncate text-sm font-medium" title={item.name}>
-            {item.name}
+          <h2 className="min-w-0 text-sm font-medium">
+            <TruncatedText text={item.name} />
           </h2>
           <Badge variant="secondary" className="shrink-0">
             <KindIcon />
             {item.kind}
           </Badge>
         </div>
-        <p className="truncate text-xs text-muted-foreground" title={describeFile(item)}>
-          {describeFile(item)}
-        </p>
+        <TruncatedText text={describeFile(item)} className="text-xs text-muted-foreground" />
         <div className="flex min-h-5 min-w-0 flex-wrap gap-1">
           {item.tags.length === 0 ? (
             <span className="text-xs text-muted-foreground">No tags</span>
           ) : (
             item.tags.map((tag) => (
               <Badge key={tag} variant="outline" className="max-w-full">
-                <span className="truncate" title={tag}>
-                  {tag}
-                </span>
+                <TruncatedText text={tag} />
               </Badge>
             ))
           )}

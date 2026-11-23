@@ -1,7 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
-import { keyLabel, providerNames, routeSlug, type SessionIds } from "./layout-seed";
+import { makePng } from "../tests/support/media-files";
+import {
+  cameraNames,
+  keyLabel,
+  mediaNames,
+  providerNames,
+  routeSlug,
+  type SessionIds,
+} from "./layout-seed";
 
 /**
  * Layout guards (docs/ui-qa.md): for every page in nav.ts and the key dialogs, at desktop and
@@ -275,6 +283,122 @@ for (const viewport of viewports) {
       await expect(end).toBeFocused();
 
       const remove = page.getByRole("button", { name: "Delete", exact: true });
+      await remove.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(remove).toBeFocused();
+    });
+
+    test("media: upload, external URL, edit and preview dialogs stay inside the dialog", async ({
+      page,
+    }) => {
+      await openPage(page, "/media");
+      await expectNoHorizontalScroll(page);
+      const upload = page.getByRole("button", { name: "Upload media" }).first();
+      await upload.click();
+      await expectDialogContained(page);
+      await page.getByTestId("media-file-input").setInputFiles({
+        name: `${"very-long-file-name-".repeat(8)}.png`,
+        mimeType: "image/png",
+        buffer: makePng(8, 8, [1, 2, 3]),
+      });
+      await page.getByLabel("Tags for these files").fill(`long-tag-${"z".repeat(70)}`);
+      await page.keyboard.press("Enter");
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(upload).toBeFocused();
+
+      const external = page.getByRole("button", { name: "Add external URL" }).first();
+      await external.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(external).toBeFocused();
+
+      const edit = page.getByRole("button", { name: `Edit ${mediaNames.long}`, exact: true });
+      await edit.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(edit).toBeFocused();
+
+      const preview = page.getByRole("button", { name: `Preview ${mediaNames.long}`, exact: true });
+      await preview.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(preview).toBeFocused();
+
+      const remove = page.getByRole("button", { name: `Delete ${mediaNames.long}`, exact: true });
+      await remove.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(remove).toBeFocused();
+    });
+
+    test("media: cards truncate long names and tags inside the grid", async ({ page }) => {
+      await openPage(page, "/media");
+      await expectNamedControls(page);
+      const overflowing = await page
+        .getByTestId("media-card")
+        .evaluateAll((cards) =>
+          cards
+            .filter((card) => card.scrollWidth > card.clientWidth + 1)
+            .map((card) => card.textContent),
+        );
+      expect(overflowing, "cards wider than the grid cell").toEqual([]);
+    });
+
+    test("cameras: form, test result, preview and delete dialogs stay inside the dialog", async ({
+      page,
+    }) => {
+      await openPage(page, "/cameras");
+      await expectNoHorizontalScroll(page);
+      const create = page.getByRole("button", { name: "New camera" });
+      await create.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      // The type-specific fields differ per type; both must fit.
+      await page.getByRole("combobox", { name: /type/i }).click();
+      await page.getByRole("option", { name: /look-at/i }).click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(create).toBeFocused();
+
+      const edit = page.getByRole("button", { name: `Edit ${cameraNames.good}`, exact: true });
+      await edit.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(edit).toBeFocused();
+
+      const test_ = page.getByRole("button", { name: `Test ${cameraNames.good}`, exact: true });
+      await test_.click();
+      await expect(page.getByRole("heading", { name: "Camera test passed" })).toBeVisible();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(test_).toBeFocused();
+
+      const failing = page.getByRole("button", {
+        name: `Test ${cameraNames.unreachable}`,
+        exact: true,
+      });
+      await failing.click();
+      await expect(page.getByRole("heading", { name: /Camera test failed/ })).toBeVisible();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(failing).toBeFocused();
+
+      const preview = page.getByRole("button", {
+        name: `Preview ${cameraNames.good}`,
+        exact: true,
+      });
+      await preview.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(preview).toBeFocused();
+
+      const remove = page.getByRole("button", { name: `Delete ${cameraNames.good}`, exact: true });
       await remove.click();
       await expectDialogContained(page);
       await page.keyboard.press("Escape");

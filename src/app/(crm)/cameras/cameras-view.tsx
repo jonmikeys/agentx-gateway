@@ -35,6 +35,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CameraFormDialog } from "@/app/(crm)/cameras/camera-form-dialog";
 import { PageHeader } from "@/components/crm/page-header";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -130,13 +131,9 @@ function CameraRow({
         </div>
       </TableCell>
       <TableCell className="max-w-[16rem] min-w-32">
-        <div className="truncate font-medium" title={camera.name}>
-          {camera.name}
-        </div>
+        <TruncatedText text={camera.name} className="font-medium" />
         {camera.description && (
-          <div className="truncate text-xs text-muted-foreground" title={camera.description}>
-            {camera.description}
-          </div>
+          <TruncatedText text={camera.description} className="text-xs text-muted-foreground" />
         )}
       </TableCell>
       <TableCell>
@@ -144,9 +141,7 @@ function CameraRow({
       </TableCell>
       <TableCell className="max-w-[18rem] min-w-32">
         {camera.url ? (
-          <div className="truncate font-mono text-xs text-muted-foreground" title={camera.url}>
-            {camera.url}
-          </div>
+          <TruncatedText text={camera.url} className="font-mono text-xs text-muted-foreground" />
         ) : (
           <span className="text-xs text-muted-foreground">No address (configured in Unity)</span>
         )}
@@ -342,7 +337,7 @@ export function CamerasView({ cameras }: { cameras: CameraView[] }) {
           </Button>
         }
       />
-      <div className="rounded-lg border [contain:inline-size]">
+      <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>

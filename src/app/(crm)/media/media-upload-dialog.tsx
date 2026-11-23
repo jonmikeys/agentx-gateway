@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { TagsInput } from "@/components/crm/tags-input";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -204,9 +205,7 @@ export function MediaUploadDialog({
                     {entry.state === "error" && (
                       <CircleAlert className="size-4 shrink-0 text-destructive" />
                     )}
-                    <span className="min-w-0 flex-1 truncate" title={entry.file.name}>
-                      {entry.file.name}
-                    </span>
+                    <TruncatedText text={entry.file.name} className="flex-1" />
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {formatBytes(entry.file.size)}
                     </span>
