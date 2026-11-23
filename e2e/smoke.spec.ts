@@ -41,7 +41,7 @@ test.describe("with credentials", () => {
 
   test("opens the command palette with Ctrl+K", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Open command palette" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Search pages/ })).toBeVisible();
     // Wait for hydration before using the keyboard shortcut.
     await page.waitForLoadState("networkidle");
     await page.keyboard.press("Control+k");

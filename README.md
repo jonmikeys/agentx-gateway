@@ -5,7 +5,22 @@ application: session and transcript tracking, media and camera catalogues, MCP s
 registry, multi-provider failover, and visual agent chatflows built on LangGraph.js.
 
 Status: under construction. G1 (scaffold) provides the admin console shell, authentication,
-database, encrypted secrets and `/health`. See [docs/spec.md](docs/spec.md) for the agreed design.
+database, encrypted secrets and `/health`. G2 (routing core) adds the OpenAI-compatible
+`/v1/models` and `/v1/chat/completions` with provider failover. See [docs/spec.md](docs/spec.md)
+for the agreed design.
+
+## Features
+
+- **OpenAI-compatible chat completions** (stream and non-stream) with ordered provider failover,
+  a per-provider circuit breaker and automatic usage reporting.
+  See [docs/providers-and-routes.md](docs/providers-and-routes.md).
+- **Providers and model routes** managed in the CRM; provider keys are encrypted at rest and
+  write-only.
+- **Client API keys** with hashed storage, shown once, optional IP allowlist, requests/minute and
+  tokens/day limits. See [docs/api-keys.md](docs/api-keys.md).
+- **Request log** (timings, attempts, token usage; never message content).
+- Admin console with Basic auth, dark/light themes and a Ctrl+K command palette
+  (screenshots in [docs/screenshots](docs/screenshots/README.md)).
 
 ## Quick start (Docker Compose)
 
@@ -49,7 +64,8 @@ whether it is required; [`.env.example`](.env.example) documents every one.
 | `pnpm typecheck` | TypeScript (`tsc --noEmit`) |
 | `pnpm test:unit` | Vitest unit tests |
 | `pnpm test:integration` | Vitest + Testcontainers Postgres (needs Docker) |
-| `pnpm test:e2e` | Playwright smoke tests against a running app |
+| `pnpm test:e2e` | Playwright tests against a running app |
+| `pnpm screenshots` | Regenerate `docs/screenshots` (needs a running app and a fresh database) |
 | `pnpm db:generate` / `db:migrate` / `db:studio` | Drizzle migrations and studio |
 | `pnpm secrets:genkey` | Print a fresh base64 `GATEWAY_ENCRYPTION_KEY` |
 | `pnpm secrets:rotate` | Re-encrypt stored secrets under `NEW_GATEWAY_ENCRYPTION_KEY` |
