@@ -13,7 +13,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $env:E2E_BASE_URL = "http://localhost:$Port"
 $env:MOCK_UPSTREAM_PORT = "$MockPort"
-$playwrightArgs = @('exec', 'playwright', 'test') + $Specs
+# Through `pnpm e2e:run -- -Specs a,b` the list can arrive as one "a b" or "a,b" string.
+$specList = @($Specs | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+$playwrightArgs = @('exec', 'playwright', 'test') + $specList
 if ($Grep) { $playwrightArgs += @('--grep', $Grep) }
 try {
     & pnpm @playwrightArgs

@@ -186,9 +186,12 @@ export function TestDrawer({
           Trace
         </Button>
         {trace && (
-          <Badge variant={trace.status === "ok" ? "secondary" : "destructive"} className="ml-auto">
-            {trace.status} · {plural(trace.steps.length, "step")} ·{" "}
-            {formatDuration(trace.duration_ms)}
+          <Badge
+            variant={trace.paused ? "outline" : trace.status === "ok" ? "secondary" : "destructive"}
+            className="ml-auto"
+          >
+            {trace.paused ? "paused for client" : trace.status} ·{" "}
+            {plural(trace.steps.length, "step")} · {formatDuration(trace.duration_ms)}
           </Badge>
         )}
       </div>

@@ -135,6 +135,10 @@ interface ChatflowEditorProps {
   subflows: SubflowOption[];
 }
 
+/** Fit options shared by the initial fit, the fit button and the drawer-close refit. The extra
+ * padding keeps a fitted flow clear of the bottom-right minimap. */
+const FIT_VIEW = { padding: 0.3, maxZoom: 1.2 } as const;
+
 function variableNames(nodes: EditorNode[]): string[] {
   const names = new Set<string>();
   for (const node of nodes) {
@@ -396,7 +400,7 @@ export function ChatflowEditor({
   }
 
   function fitCanvas() {
-    void flowInstance.current?.fitView({ padding: 0.2, duration: 200 });
+    void flowInstance.current?.fitView({ ...FIT_VIEW, duration: 200 });
   }
 
   /**
@@ -608,11 +612,12 @@ export function ChatflowEditor({
     return () => clearTimeout(timer);
   }, [graphJson, graph, flow.id]);
 
-  // Refit the visible canvas when the drawer changes its height; minZoom keeps cards readable.
+  // Opening the drawer keeps the current zoom and position, so the cards never shrink to fit the
+  // shorter canvas (pan to reach nodes under the drawer). Closing it refits the whole flow.
   useEffect(() => {
-    void drawerOpen;
+    if (drawerOpen) return;
     const timer = setTimeout(() => {
-      void flowInstance.current?.fitView({ padding: 0.2, duration: 200 });
+      void flowInstance.current?.fitView({ ...FIT_VIEW, duration: 200 });
     }, 240);
     return () => clearTimeout(timer);
   }, [drawerOpen]);
@@ -894,7 +899,7 @@ export function ChatflowEditor({
                     flowInstance.current = instance;
                   }}
                   fitView
-                  fitViewOptions={{ padding: 0.2 }}
+                  fitViewOptions={FIT_VIEW}
                   minZoom={0.6}
                   maxZoom={1.6}
                   snapToGrid
@@ -906,9 +911,16 @@ export function ChatflowEditor({
                 >
                   <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
                   <Controls position="top-left" showInteractive={false} />
-                  {/* Top-right keeps the minimap clear of the graph; hidden while the drawer shrinks the canvas. */}
+                  {/* Small and bottom-right, so fitView's padding keeps a fitted flow clear of it;
+                      hidden while the drawer shrinks the canvas. */}
                   {!drawerOpen && (
-                    <MiniMap position="top-right" pannable zoomable className="!bg-card" />
+                    <MiniMap
+                      position="bottom-right"
+                      pannable
+                      zoomable
+                      style={{ width: 160, height: 100 }}
+                      className="!bg-card"
+                    />
                   )}
                 </ReactFlow>
               </div>

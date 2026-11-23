@@ -61,6 +61,10 @@ const demo = {
   responsesSession: "",
   agentFlow: "",
   agentSession: "",
+  extrasFlow: "",
+  subflow: "",
+  callerFlow: "",
+  versionFlow: "",
 };
 
 type Message = Record<string, unknown>;
@@ -451,6 +455,270 @@ async function seedAgentFlow(): Promise<string> {
   expect(published.status()).toBe(201);
   return flow.id;
 }
+async function createDemoFlow(data: Record<string, unknown>): Promise<string> {
+  const response = await admin.post("/api/admin/flows", { data });
+  expect(response.status()).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/**
+ * Seeds the G7b editor extras: a Client Action + sticky note + group + comment, a published
+ * subflow, a caller pinned to its first version (so the "update available" badge shows) and a
+ * flow with a published version plus a changed draft for the version compare view.
+ */
+async function seedG7bFlows() {
+  const media = (await (await admin.get("/api/admin/media")).json()).data as {
+    id: string;
+    name: string;
+  }[];
+  const mediaId = media.find((entry) => entry.name === "Sunset")?.id ?? media[0]?.id;
+  expect(mediaId).toBeTruthy();
+
+  // --- extras agent: Client Action, sticky note, group and a node comment ---------------------
+  const extras = await createDemoFlow({
+    name: "Lobby extras demo",
+    slug: "lobby-extras-demo",
+    description: "Shows a picture with a Client Action, with an editor note and a visual group.",
+    enabled: false,
+  });
+  const extrasGraph = {
+    nodes: [
+      {
+        id: "start",
+        type: "start",
+        position: { x: 0, y: 0 },
+        data: {
+          title: "Start",
+          comment: "Greets visitors at the front desk.",
+          commentUpdatedAt: "2026-11-01T09:15:00.000Z",
+        },
+      },
+      {
+        id: "show_photo",
+        type: "client_action",
+        position: { x: 0, y: 160 },
+        data: {
+          title: "Show the lobby picture",
+          toolName: "show_image",
+          argsTemplate: `{\n  "media_id": "${mediaId}"\n}`,
+          outputVariable: "client_result",
+        },
+      },
+      {
+        id: "group_replies",
+        type: "group",
+        position: { x: 0, y: 320 },
+        width: 300,
+        height: 180,
+        zIndex: -1,
+        data: { title: "Front desk replies", color: "blue", collapsed: false },
+      },
+      {
+        id: "reply",
+        type: "reply",
+        parentId: "group_replies",
+        position: { x: 30, y: 40 },
+        data: {
+          title: "Aiko's reply",
+          template: "Here is the lobby picture you asked for.",
+        },
+      },
+      { id: "end", type: "end", position: { x: 0, y: 540 }, data: { title: "End" } },
+      {
+        id: "note_1",
+        type: "note",
+        position: { x: 360, y: 160 },
+        width: 280,
+        height: 200,
+        zIndex: 1,
+        data: {
+          title: "Editor note",
+          markdown:
+            "**Canvas-only helpers**\n\n- Sticky notes hold Markdown\n- Groups move their children\n- Comments open from the speech bubble",
+          color: "yellow",
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "show_photo", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "show_photo", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e3", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${extras}/draft`, { data: { graph: extrasGraph } })
+    ).status(),
+  ).toBe(200);
+  demo.extrasFlow = extras;
+
+  // --- subflow: one input, one output ----------------------------------------------------------
+  const subflow = await createDemoFlow({
+    name: "Lobby topic lookup",
+    slug: "lobby-topic-lookup",
+    description: "Answers a visitor question about a lobby topic.",
+    kind: "subflow",
+    enabled: true,
+  });
+  const subflowGraph = {
+    nodes: [
+      {
+        id: "in",
+        type: "subflow_input",
+        position: { x: 0, y: 0 },
+        data: { title: "Input", params: [{ name: "topic", type: "string", required: true }] },
+      },
+      {
+        id: "say",
+        type: "reply",
+        position: { x: 300, y: 0 },
+        data: { title: "Topic answer", template: "You asked about {{vars.topic}}." },
+      },
+      {
+        id: "out",
+        type: "subflow_output",
+        position: { x: 600, y: 0 },
+        data: {
+          title: "Answer",
+          label: "answer",
+          values: [{ name: "summary", value: "{{nodes.say.output}}" }],
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "in", target: "say", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "say", target: "out", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${subflow}/draft`, { data: { graph: subflowGraph } })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${subflow}/publish`, { data: { note: "Demo subflow v1" } })
+    ).status(),
+  ).toBe(201);
+  demo.subflow = subflow;
+
+  // --- caller pinned to subflow v1, then the subflow moves to v2 -------------------------------
+  const caller = await createDemoFlow({
+    name: "Lobby subflow caller",
+    slug: "lobby-subflow-caller",
+    description: "Calls the topic lookup subflow and answers with its result.",
+    enabled: false,
+  });
+  const callerGraph = {
+    nodes: [
+      { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+      {
+        id: "call",
+        type: "call_subflow",
+        position: { x: 0, y: 160 },
+        data: {
+          title: "Look up the topic",
+          subflowId: subflow,
+          subflowName: "Lobby topic lookup",
+          inputs: [{ name: "topic", value: "{{input.text}}" }],
+          outputs: [{ label: "answer", variable: "topic_answer" }],
+        },
+      },
+      {
+        id: "reply",
+        type: "reply",
+        position: { x: 0, y: 320 },
+        data: { title: "Answer the visitor", template: "{{vars.topic_answer}}" },
+      },
+      { id: "end", type: "end", position: { x: 0, y: 480 }, data: { title: "End" } },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "call", sourceHandle: "out", type: "smoothstep" },
+      {
+        id: "e2",
+        source: "call",
+        target: "reply",
+        sourceHandle: "out:answer",
+        type: "smoothstep",
+      },
+      { id: "e3", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${caller}/draft`, { data: { graph: callerGraph } })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${caller}/publish`, { data: { note: "Pins v1" } })
+    ).status(),
+  ).toBe(201);
+  demo.callerFlow = caller;
+  // A newer published subflow version makes the caller's Call Subflow node show "Update v1 -> v2".
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${subflow}/publish`, { data: { note: "Demo subflow v2" } })
+    ).status(),
+  ).toBe(201);
+
+  // --- version compare: a published v1 and a changed draft -------------------------------------
+  const version = await createDemoFlow({
+    name: "Lobby version compare",
+    slug: "lobby-version-compare",
+    description: "A published flow whose draft has since changed.",
+    enabled: false,
+  });
+  const starter = {
+    nodes: [
+      { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+      {
+        id: "reply",
+        type: "reply",
+        position: { x: 260, y: 0 },
+        data: { title: "Greeting", template: "Hi! How can I help?" },
+      },
+      { id: "end", type: "end", position: { x: 520, y: 0 }, data: { title: "End" } },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (await admin.put(`/api/admin/flows/${version}/draft`, { data: { graph: starter } })).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${version}/publish`, { data: { note: "Before edits" } })
+    ).status(),
+  ).toBe(201);
+  const changed = {
+    nodes: [
+      starter.nodes[0],
+      {
+        ...starter.nodes[1],
+        data: { title: "Greeting", template: "Hi there! Ask me about the lobby." },
+      },
+      starter.nodes[2],
+      {
+        id: "note_diff",
+        type: "note",
+        position: { x: 0, y: 180 },
+        width: 260,
+        height: 140,
+        zIndex: 1,
+        data: { title: "New note", markdown: "Added after publishing.", color: "green" },
+      },
+    ],
+    edges: starter.edges,
+  };
+  expect(
+    (await admin.put(`/api/admin/flows/${version}/draft`, { data: { graph: changed } })).status(),
+  ).toBe(200);
+  demo.versionFlow = version;
+}
+
 /** Seeds sessions by sending real requests, then backdates demo history for the charts. */
 async function seedSessions() {
   const database = postgres(databaseUrl, { max: 2 });
@@ -646,8 +914,9 @@ test.beforeAll(async () => {
     extraHTTPHeaders: { Authorization: `Bearer ${clientKey}` },
   });
   demo.agentFlow = await seedAgentFlow();
-  await seedSessions();
   mediaSeed = await seedMediaAndCameras(admin, { mjpeg: MOCK_MJPEG_PORT, video: MOCK_VIDEO_PORT });
+  await seedG7bFlows();
+  await seedSessions();
 });
 
 test.afterAll(async () => {
@@ -695,6 +964,17 @@ for (const theme of themes) {
       await page.evaluate(() => document.fonts.ready);
       // Charts animate in; wait for them to finish before capturing.
       await page.waitForTimeout(800);
+    }
+
+    /**
+     * Fits the flow before settling. Fit before the animation-disabling CSS goes in: React Flow
+     * applies the viewport through a transition, so disabling transitions first makes fit a no-op.
+     */
+    async function settleCanvas(page: import("@playwright/test").Page) {
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("rf__controls").getByRole("button", { name: "Fit View" }).click();
+      await page.waitForTimeout(400);
+      await settle(page);
     }
 
     /** Dialogs must be fully open and no closing dialog or overlay may remain stacked behind. */
@@ -828,7 +1108,7 @@ for (const theme of themes) {
       await page.goto(`/chatflows/${demo.agentFlow}`);
       await expect(page.getByRole("heading", { name: "Lobby greeter", level: 1 })).toBeVisible();
       await expect(page.getByTestId("flow-node-llm")).toBeVisible();
-      await settle(page);
+      await settleCanvas(page);
       await save(
         page,
         "state-chatflow-editor",
@@ -842,7 +1122,7 @@ for (const theme of themes) {
       await expect(page.getByTestId("flow-node-router")).toBeVisible();
       await page.locator('[data-node-type="router"]').click({ position: { x: 12, y: 12 } });
       await expect(page.getByText("Intent labels")).toBeVisible();
-      await settle(page);
+      await settleCanvas(page);
       await save(
         page,
         "state-chatflow-properties",
@@ -853,7 +1133,7 @@ for (const theme of themes) {
 
     test("state: chatflow publish dialog", async ({ page }) => {
       await page.goto(`/chatflows/${demo.agentFlow}`);
-      await settle(page);
+      await settleCanvas(page);
       await page.getByRole("button", { name: "Publish", exact: true }).click();
       await expect(page.getByText("Validation passed.")).toBeVisible();
       await settleDialog(page);
@@ -868,7 +1148,7 @@ for (const theme of themes) {
 
     test("state: chatflow version history", async ({ page }) => {
       await page.goto(`/chatflows/${demo.agentFlow}`);
-      await settle(page);
+      await settleCanvas(page);
       await page.getByRole("button", { name: "Versions", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
       await page.getByRole("button", { name: "View version 1" }).click();
@@ -884,7 +1164,7 @@ for (const theme of themes) {
 
     test("state: chatflow test drawer with trace", async ({ page }) => {
       await page.goto(`/chatflows/${demo.agentFlow}`);
-      await settle(page);
+      await settleCanvas(page);
       await page.getByRole("button", { name: "Open test drawer" }).click();
       await page
         .getByRole("textbox", { name: "Test message" })
@@ -900,6 +1180,178 @@ for (const theme of themes) {
         page,
         "state-chatflow-test-trace",
         "Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node)",
+        false,
+      );
+      await page.getByRole("button", { name: "Close test drawer" }).click();
+    });
+
+    test("state: chatflow Client Action properties", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.getByTestId("flow-node-show_photo")).toBeVisible();
+      await page.locator('[data-node-type="client_action"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByLabel("Client tool")).toBeVisible();
+      await expect(page.getByLabel("Media item")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-client-action",
+        "Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template)",
+        false,
+      );
+    });
+
+    test("state: chatflow sticky notes and group", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.locator('[data-node-type="note"]')).toBeVisible();
+      await expect(page.locator('[data-node-type="group"]')).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-notes-group",
+        "Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed",
+        false,
+      );
+    });
+
+    test("state: chatflow comment popover", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.getByTestId("flow-node-start")).toBeVisible();
+      await settleCanvas(page);
+      // Dispatch the click: the node can sit under the canvas overlay when the graph is small.
+      await page
+        .getByRole("button", { name: "Show comment" })
+        .first()
+        .evaluate((element) => (element as HTMLElement).click());
+      await expect(page.getByText(/Last edited/)).toBeVisible();
+      await save(
+        page,
+        "state-chatflow-comment",
+        "Chatflow editor: the node comment popover with the last-edited time",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow subflow editor", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.subflow}`);
+      await expect(
+        page.getByRole("heading", { name: "Lobby topic lookup", level: 1 }),
+      ).toBeVisible();
+      await expect(page.getByTestId("flow-node-in")).toBeVisible();
+      await expect(page.getByTestId("flow-node-out")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-subflow",
+        "Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output",
+        false,
+      );
+    });
+
+    test("state: chatflow Call Subflow update badge", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.callerFlow}`);
+      await expect(page.getByTestId("flow-node-call")).toBeVisible();
+      await expect(page.getByTestId("node-badge")).toContainText("Update v1 → v2");
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-call-subflow",
+        'Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published',
+        false,
+      );
+    });
+
+    test("state: chatflow version compare", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.versionFlow}`);
+      await expect(
+        page.getByRole("heading", { name: "Lobby version compare", level: 1 }),
+      ).toBeVisible();
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Versions", exact: true }).click();
+      await page.getByRole("button", { name: "View version 1" }).click();
+      await page.getByRole("button", { name: "Compare with draft" }).click();
+      await expect(page.getByTestId("version-diff")).toBeVisible();
+      await expect(page.getByText("Added nodes")).toBeVisible();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-version-compare",
+        "Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow import with re-link", async ({ page }) => {
+      const payload = {
+        format: "agentx.chatflow",
+        format_version: 1,
+        flow: {
+          name: "Imported lobby flow",
+          kind: "agent",
+          description: "Imported from JSON; webhook headers need re-linking.",
+          settings: { default_route_slug: null, allowed_media_tags: [], allowed_cameras: [] },
+        },
+        graph: {
+          nodes: [
+            { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+            {
+              id: "hook",
+              type: "webhook",
+              position: { x: 260, y: 0 },
+              data: {
+                title: "Notify the desk",
+                method: "POST",
+                url: "https://lobby.internal/notify",
+                headers: [{ name: "X-Api-Key" }],
+                bodyTemplate: "",
+                timeoutMs: 10_000,
+                retries: 0,
+                maxResponseBytes: 65_536,
+                mappings: [],
+                outputVariable: "hook",
+              },
+            },
+            { id: "end", type: "end", position: { x: 520, y: 0 }, data: { title: "End" } },
+          ],
+          edges: [
+            { id: "e1", source: "start", target: "hook", sourceHandle: "out" },
+            { id: "e2", source: "hook", target: "end", sourceHandle: "out" },
+          ],
+        },
+      };
+      await page.goto("/chatflows");
+      await settle(page);
+      await page.getByRole("button", { name: "Import JSON" }).click();
+      await page.getByLabel("Imported chatflow JSON").fill(JSON.stringify(payload));
+      await page.getByRole("button", { name: "Import chatflow" }).click();
+      await expect(page.getByText("Re-link these webhook headers:")).toBeVisible();
+      await expect(page.getByLabel("Webhook headers to re-link")).toContainText("X-Api-Key");
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-import",
+        "Chatflows: the JSON import dialog listing the webhook headers that must be re-linked",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow paused for client trace", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Open test drawer" }).click();
+      await page.getByRole("textbox", { name: "Test message" }).fill("Show me the lobby.");
+      await page.getByRole("button", { name: "Run test message" }).click();
+      await page.getByRole("button", { name: "Trace" }).last().click();
+      await expect(page.getByTestId("test-trace")).toContainText("Paused (waiting for client)", {
+        timeout: 30_000,
+      });
+      await settle(page);
+      await save(
+        page,
+        "state-chatflow-paused-trace",
+        "Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result",
         false,
       );
       await page.getByRole("button", { name: "Close test drawer" }).click();
