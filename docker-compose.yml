@@ -25,14 +25,18 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Points at the bundled postgres service; overrides DATABASE_URL from .env.
-      DATABASE_URL: postgres://${POSTGRES_USER:-agentx}:${POSTGRES_PASSWORD:-agentx}@postgres:5432/${POSTGRES_DB:-agentx}
+      # docker-entrypoint.sh builds DATABASE_URL from these, percent-encoding each
+      # component: Compose string interpolation cannot URL-encode values.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       MEDIA_STORAGE_DIR: /data/media
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "${GATEWAY_BIND_ADDRESS:-0.0.0.0}:${GATEWAY_PORT:-3000}:3000"
+      # Loopback by default: the app trusts X-Forwarded-For for rate limiting, so do
+      # not publish it on other interfaces unless Caddy (or your LAN) is the only path.
+      - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-3000}:3000"
     volumes:
       - media-data:/data/media
 
