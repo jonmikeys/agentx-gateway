@@ -14,3 +14,5 @@ next-env.d.ts
 data/
 .DS_Store
 *.log
+# Vendored at dev/build time by scripts/vendor-scalar.mjs
+public/vendor/
