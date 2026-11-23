@@ -1,6 +1,7 @@
 "use client";
 
 import { ImageIcon, Link2, Search, Upload } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -215,17 +216,22 @@ export function MediaLibrary({ items, tags }: { items: MediaView[]; tags: string
           </DialogHeader>
           {previewing &&
             (previewing.kind === "image" ? (
-              <img
+              <Image
+                unoptimized
+                width={1280}
+                height={720}
                 src={previewing.preview_url}
                 alt={previewing.name}
-                className="max-h-[70svh] w-full rounded-lg object-contain"
+                className="h-auto max-h-[70svh] w-full rounded-lg object-contain"
               />
             ) : (
               <video
                 src={previewing.preview_url}
                 controls
                 className="max-h-[70svh] w-full rounded-lg"
-              />
+              >
+                <track kind="captions" />
+              </video>
             ))}
         </DialogContent>
       </Dialog>

@@ -29,6 +29,7 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -223,10 +224,14 @@ function PreviewBody({ camera }: { camera: CameraView }) {
     );
   }
   return (
-    <img
+    // An authenticated MJPEG stream: it must not go through the image optimizer.
+    <Image
+      unoptimized
+      width={1280}
+      height={720}
       src={`/api/admin/cameras/${camera.id}/preview`}
       alt={`Live preview of ${camera.name}`}
-      className="max-h-[60svh] w-full rounded-lg bg-muted object-contain"
+      className="h-auto max-h-[60svh] w-full rounded-lg bg-muted object-contain"
       onError={() => setFailed(true)}
     />
   );

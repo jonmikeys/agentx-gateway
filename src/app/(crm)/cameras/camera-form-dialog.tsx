@@ -24,6 +24,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -246,10 +247,17 @@ export function CameraFormDialog({
                     control={control}
                     name="clear_credentials"
                     render={({ field }) => (
-                      <label className="flex items-center gap-2 text-sm">
-                        <Switch size="sm" checked={field.value} onCheckedChange={field.onChange} />
-                        Remove the stored credentials
-                      </label>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          size="sm"
+                          id="camera-clear-credentials"
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                        <Label htmlFor="camera-clear-credentials" className="font-normal">
+                          Remove the stored credentials
+                        </Label>
+                      </div>
                     )}
                   />
                 )}

@@ -1,8 +1,10 @@
 "use client";
 
 import { Film, ImageIcon, Pencil, Play, Trash2 } from "lucide-react";
+import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { formatBytes } from "@/server/media/types";
 import type { MediaView } from "@/server/services/media";
@@ -11,7 +13,10 @@ import type { MediaView } from "@/server/services/media";
 export function MediaThumbnail({ item, className }: { item: MediaView; className?: string }) {
   if (item.kind === "image") {
     return (
-      <img
+      <Image
+        unoptimized
+        width={320}
+        height={180}
         src={item.preview_url}
         alt=""
         loading="lazy"
@@ -108,15 +113,18 @@ export function MediaCard({
           )}
         </div>
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Switch
               size="sm"
+              id={`media-enabled-${item.id}`}
               aria-label={`Enable ${item.name}`}
               checked={item.enabled}
               onCheckedChange={(checked) => onToggleEnabled(item, checked)}
             />
-            {item.enabled ? "Enabled" : "Disabled"}
-          </label>
+            <Label htmlFor={`media-enabled-${item.id}`} className="text-xs font-normal">
+              {item.enabled ? "Enabled" : "Disabled"}
+            </Label>
+          </div>
           <div className="flex shrink-0 gap-1">
             <Button
               variant="ghost"
