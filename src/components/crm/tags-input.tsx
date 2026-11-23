@@ -55,7 +55,7 @@ export function TagsInput({
             aria-label={`Remove tag ${tag}`}
             onClick={() => onChange(value.filter((existing) => existing !== tag))}
           >
-            <X />
+            <X className="size-3" />
           </button>
         </Badge>
       ))}
