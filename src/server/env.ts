@@ -25,6 +25,10 @@ export const envSchema = z.object({
     isValidEncryptionKey,
     "must be base64 and decode to exactly 32 bytes (run `pnpm secrets:genkey`)",
   ),
+  NEW_GATEWAY_ENCRYPTION_KEY: optionalText.refine(
+    (value) => value === undefined || isValidEncryptionKey(value),
+    "must be base64 and decode to exactly 32 bytes (run `pnpm secrets:genkey`)",
+  ),
   ADMIN_USERNAME: requiredText,
   ADMIN_PASSWORD: requiredText,
   PUBLIC_BASE_URL: optionalText.refine(

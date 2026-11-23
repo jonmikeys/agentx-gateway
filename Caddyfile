@@ -4,6 +4,9 @@
 	encode zstd gzip
 	# Streaming responses (SSE) must not be buffered.
 	reverse_proxy app:3000 {
+		# Replace any client-supplied value so the app's rate limiter keys on the
+		# real client address instead of a spoofed X-Forwarded-For prefix.
+		header_up X-Forwarded-For {remote_host}
 		flush_interval -1
 	}
 }

@@ -36,6 +36,30 @@ describe("database migrations", () => {
     await expect(runMigrations(databaseUrl)).resolves.toBeUndefined();
   });
 
+  it("serializes concurrent migrations on a fresh database", async () => {
+    const name = `migrate_lock_${Date.now()}`;
+    await sql.unsafe(`create database ${name}`);
+    try {
+      const target = new URL(databaseUrl);
+      target.pathname = `/${name}`;
+      await Promise.all([runMigrations(target.toString()), runMigrations(target.toString())]);
+
+      const check = createSql(target.toString(), { max: 1, onnotice: () => {} });
+      try {
+        const [row] = await check<{ present: boolean }[]>`
+          select exists (
+            select 1 from information_schema.tables
+            where table_schema = 'public' and table_name = 'settings'
+          ) as present`;
+        expect(row.present).toBe(true);
+      } finally {
+        await check.end({ timeout: 2 });
+      }
+    } finally {
+      await sql.unsafe(`drop database if exists ${name} with (force)`);
+    }
+  });
+
   it("round-trips a settings row through Drizzle", async () => {
     const db = drizzle(sql);
     await db.insert(settings).values({ key: "idle_timeout_minutes", value: { minutes: 30 } });
