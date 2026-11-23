@@ -14,6 +14,8 @@ export const providerNames = {
   short: "Layout QA mock",
   // Fails every request, so its circuit breaker opening never affects the other providers.
   flaky: "Layout QA flaky",
+  // Declares responses_api, so /v1/responses is forwarded to it natively.
+  native: "Layout QA native Responses",
 };
 export const longBaseUrlPath = `/v1/${"a".repeat(120)}`;
 export const routeSlug = "layout-qa-route-with-a-very-long-id-for-checking-layout-1234";
@@ -27,8 +29,9 @@ export interface SessionIds {
   reasoning: string;
   tools: string;
   ended: string;
+  responses: string;
 }
-const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "" };
+const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
   const list = async (collection: string) =>
@@ -41,8 +44,9 @@ async function seed(admin: APIRequestContext, upstream: MockUpstream) {
     { name: providerNames.long, base_url: `${upstream.url}${longBaseUrlPath}` },
     { name: providerNames.short, base_url: upstream.url },
     { name: providerNames.flaky, base_url: upstream.url },
+    { name: providerNames.native, base_url: upstream.url, responsesApi: true },
   ];
-  for (const { name, base_url } of providers) {
+  for (const { name, base_url, responsesApi } of providers) {
     const found = (await list("providers")).find((provider) => provider.name === name);
     if (found) {
       ids[name] = found.id;
@@ -56,7 +60,14 @@ async function seed(admin: APIRequestContext, upstream: MockUpstream) {
       continue;
     }
     const response = await admin.post("/api/admin/providers", {
-      data: { name, base_url, api_key: "sk-layout-qa-not-a-real-key" },
+      data: {
+        name,
+        base_url,
+        api_key: "sk-layout-qa-not-a-real-key",
+        ...(responsesApi
+          ? { capabilities: { streaming: true, tools: true, responses_api: true } }
+          : {}),
+      },
     });
     expect(response.status()).toBe(201);
     ids[name] = (await response.json()).id;
@@ -96,6 +107,7 @@ async function seedSessions(admin: APIRequestContext, baseURL: string) {
     name: string;
   }[];
   const flakyId = providers.find((provider) => provider.name === providerNames.flaky)?.id;
+  const nativeId = providers.find((provider) => provider.name === providerNames.native)?.id;
   const shortId = providers.find((provider) => provider.name === providerNames.short)?.id;
   const routes: [string, [string | undefined, string][]][] = [
     [
@@ -108,6 +120,8 @@ async function seedSessions(admin: APIRequestContext, baseURL: string) {
     ["layout-qa-reasoning", [[shortId, "reasoning"]]],
     ["layout-qa-tools", [[shortId, "tool-call"]]],
     ["layout-qa-ended", [[shortId, "echo"]]],
+    ["layout-qa-responses-chat", [[shortId, "reasoning"]]],
+    ["layout-qa-responses-native", [[nativeId, "echo"]]],
   ];
   const existingRoutes = ((await (await admin.get("/api/admin/routes")).json()).data ?? []) as {
     slug: string;
@@ -184,6 +198,35 @@ async function seedSessions(admin: APIRequestContext, baseURL: string) {
       { role: "tool", tool_call_id: "call_mock_1", content: "Image shown" },
     ],
     sessionIds.tools,
+  );
+
+  // Responses API client: a translated turn (responses -> chat), then a native one.
+  const responsesTurn = async (model: string, input: Message[], sessionId?: string) => {
+    const response = await gateway.post("/v1/responses", {
+      data: { model, stream: true, input, instructions: "You are Aiko." },
+      headers: sessionId ? { "X-Session-Id": sessionId } : {},
+    });
+    expect(response.status()).toBe(200);
+    await response.text();
+    return response.headers()["x-session-id"] as string;
+  };
+  sessionIds.responses = await responsesTurn("layout-qa-responses-chat", [
+    { role: "user", content: nasty[0] },
+  ]);
+  await expect
+    .poll(async () => {
+      const detail = await (await admin.get(`/api/admin/sessions/${sessionIds.responses}`)).json();
+      return detail.turn_count ?? 0;
+    })
+    .toBeGreaterThan(0);
+  await responsesTurn(
+    "layout-qa-responses-native",
+    [
+      { role: "user", content: nasty[0] },
+      { role: "assistant", content: "Hello." },
+      { role: "user", content: nasty[1] },
+    ],
+    sessionIds.responses,
   );
 
   sessionIds.ended = await chat("layout-qa-ended", [{ role: "user", content: "Bye." }]);
