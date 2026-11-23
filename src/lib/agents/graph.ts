@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 /**
  * Chatflow graph model (docs/agents.md). A flow is React Flow JSON: nodes carry a Zod-validated
@@ -433,6 +433,11 @@ export function starterGraph(): FlowGraph {
   };
 }
 
+/** `1 label`, `2 labels` for compact UI counts. */
+export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
 /** Short human summary of a node for its card. */
 export function summarizeNode(node: FlowNode): string {
   switch (node.type) {
@@ -440,12 +445,12 @@ export function summarizeNode(node: FlowNode): string {
       return "Entry point";
     case "llm": {
       const model = node.data.model === "inherit" ? "inherit route" : node.data.model;
-      return `${model} ﾂｷ ${node.data.history === "full" ? "full history" : node.data.history}`;
+      return `${model} · ${node.data.history === "full" ? "full history" : node.data.history}`;
     }
     case "router":
       return node.data.mode === "intent"
-        ? `Intent ﾂｷ ${node.data.intentLabels.length} labels`
-        : `Rules ﾂｷ ${node.data.rules.length}`;
+        ? `Intent · ${plural(node.data.intentLabels.length, "label")}`
+        : `Rules · ${plural(node.data.rules.length, "rule")}`;
     case "set_variable":
       return node.data.assignments.length === 0
         ? "No assignments"

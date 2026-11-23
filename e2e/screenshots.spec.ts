@@ -6,6 +6,7 @@ import {
   request as playwrightRequest,
   test,
 } from "@playwright/test";
+import dagre from "dagre";
 import postgres from "postgres";
 import { navGroups } from "../src/components/app-shell/nav";
 import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
@@ -401,17 +402,47 @@ async function seedAgentFlow(): Promise<string> {
   const graph = {
     nodes: [start, router, webhookNode, memory, llm, reply, smalltalk, end],
     edges: [
-      { id: "e1", source: "start", target: "router", sourceHandle: "out" },
-      { id: "e2", source: "router", target: "smalltalk", sourceHandle: "intent:smalltalk" },
-      { id: "e3", source: "router", target: "hook", sourceHandle: "default" },
-      { id: "e4", source: "hook", target: "remember_memory", sourceHandle: "out" },
-      { id: "e5", source: "hook", target: "llm", sourceHandle: "error" },
-      { id: "e6", source: "remember_memory", target: "llm", sourceHandle: "out" },
-      { id: "e7", source: "llm", target: "reply", sourceHandle: "out" },
-      { id: "e8", source: "reply", target: "end", sourceHandle: "out" },
-      { id: "e9", source: "smalltalk", target: "end", sourceHandle: "out" },
+      { id: "e1", source: "start", target: "router", sourceHandle: "out", type: "smoothstep" },
+      {
+        id: "e2",
+        source: "router",
+        target: "smalltalk",
+        sourceHandle: "intent:smalltalk",
+        type: "smoothstep",
+      },
+      { id: "e3", source: "router", target: "hook", sourceHandle: "default", type: "smoothstep" },
+      {
+        id: "e4",
+        source: "hook",
+        target: "remember_memory",
+        sourceHandle: "out",
+        type: "smoothstep",
+      },
+      { id: "e5", source: "hook", target: "llm", sourceHandle: "error", type: "smoothstep" },
+      {
+        id: "e6",
+        source: "remember_memory",
+        target: "llm",
+        sourceHandle: "out",
+        type: "smoothstep",
+      },
+      { id: "e7", source: "llm", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e8", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+      { id: "e9", source: "smalltalk", target: "end", sourceHandle: "out", type: "smoothstep" },
     ],
   };
+  // Dagre lays the demo out top-to-bottom with generous separation so smoothstep edges route
+  // between cards instead of cutting across them.
+  const layout = new dagre.graphlib.Graph();
+  layout.setDefaultEdgeLabel(() => ({}));
+  layout.setGraph({ rankdir: "TB", nodesep: 70, ranksep: 110, marginx: 40, marginy: 40 });
+  for (const node of graph.nodes) layout.setNode(node.id, { width: 232, height: 104 });
+  for (const edge of graph.edges) layout.setEdge(edge.source, edge.target);
+  dagre.layout(layout);
+  for (const node of graph.nodes) {
+    const placed = layout.node(node.id);
+    node.position = { x: Math.round(placed.x - 116), y: Math.round(placed.y - 52) };
+  }
   const drafted = await admin.put(`/api/admin/flows/${flow.id}/draft`, { data: { graph } });
   expect(drafted.status()).toBe(200);
   const published = await admin.post(`/api/admin/flows/${flow.id}/publish`, {

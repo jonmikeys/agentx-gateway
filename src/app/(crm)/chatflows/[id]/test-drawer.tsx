@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { ChevronDown, CircleAlert, Play, Route, Timer } from "lucide-react";
 import { useRef, useState } from "react";
@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { plural } from "@/lib/agents/graph";
 import type { RunTrace, RunTraceStep } from "@/lib/agents/types";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -186,7 +187,8 @@ export function TestDrawer({
         </Button>
         {trace && (
           <Badge variant={trace.status === "ok" ? "secondary" : "destructive"} className="ml-auto">
-            {trace.status} ﾂｷ {trace.steps.length} steps ﾂｷ {formatDuration(trace.duration_ms)}
+            {trace.status} · {plural(trace.steps.length, "step")} ·{" "}
+            {formatDuration(trace.duration_ms)}
           </Badge>
         )}
       </div>

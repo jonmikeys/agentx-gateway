@@ -1,4 +1,4 @@
-﻿import { type FlowGraph, type FlowNode, isFallibleNode, nodeHandles } from "@/lib/agents/graph";
+import { type FlowGraph, type FlowNode, isFallibleNode, nodeHandles } from "@/lib/agents/graph";
 import { renderTemplate, resolvePath, type TemplateScope } from "@/lib/agents/templates";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { AgentRuntimeError, chatThroughRoute } from "@/server/agents/llm";
@@ -7,7 +7,7 @@ import type { TokenUsage } from "@/server/db/schema";
 import type { ResolvedMcpTool } from "@/server/services/mcp";
 import type { ResolvedRoute } from "@/server/services/routes";
 
-/** The LangGraph state shared by every node (spec ﾂｧ13: messages, sessionId, vars, memory, output). */
+/** The LangGraph state shared by every node (spec §13: messages, sessionId, vars, memory, output). */
 export interface AgentState {
   messages: unknown[];
   sessionId: string;

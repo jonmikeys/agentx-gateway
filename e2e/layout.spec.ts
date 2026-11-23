@@ -41,6 +41,14 @@ async function openPage(page: Page, href: string) {
   await page.goto(href);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await page.waitForLoadState("networkidle");
+  await expectNoMojibake(page);
+}
+
+/** No rendered text may contain the replacement character or Shift-JIS mojibake. */
+async function expectNoMojibake(page: Page) {
+  const text = (await page.locator("body").textContent()) ?? "";
+  const found = text.match(/[\uFFFD\uFF82\uFF77\uFF67]/);
+  expect(found?.[0] ?? null, "rendered mojibake or replacement character").toBeNull();
 }
 
 async function expectNoHorizontalScroll(page: Page) {
@@ -459,6 +467,7 @@ for (const viewport of viewports) {
       const publish = page.getByRole("button", { name: "Publish", exact: true });
       await publish.click();
       await expect(page.getByText("Validation passed.")).toBeVisible();
+      await expectNoMojibake(page);
       await expectDialogContained(page);
       await expectNoSeriousAxeViolations(page, '[role="dialog"]');
       await page.keyboard.press("Escape");
@@ -483,6 +492,7 @@ for (const viewport of viewports) {
       const openDrawer = page.getByRole("button", { name: "Open test drawer" });
       await openDrawer.click();
       await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
+      await expectNoMojibake(page);
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
       await page.getByRole("button", { name: "Close test drawer" }).click();

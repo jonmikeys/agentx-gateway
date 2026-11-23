@@ -1,4 +1,4 @@
-﻿import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import type { FlowGraph, FlowNode } from "@/lib/agents/graph";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { getCheckpointer } from "@/server/agents/checkpointer";
@@ -13,7 +13,7 @@ import {
 } from "@/server/agents/nodes";
 import type { TokenUsage } from "@/server/db/schema";
 
-/** LangGraph state: one channel per spec ﾂｧ13 field plus run bookkeeping. */
+/** LangGraph state: one channel per spec §13 field plus run bookkeeping. */
 const AgentAnnotation = Annotation.Root({
   messages: Annotation<unknown[]>({ reducer: (_previous, next) => next, default: () => [] }),
   sessionId: Annotation<string>({ reducer: (_previous, next) => next, default: () => "" }),

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   addEdge,
@@ -449,7 +449,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
             <Save className="size-3" />
             {saveLabel}
             {saveState === "saved" && (
-              <span className="hidden sm:inline">ﾂｷ {savedAt.slice(11, 16)} UTC</span>
+              <span className="hidden sm:inline">· {savedAt.slice(11, 16)} UTC</span>
             )}
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-1">
@@ -530,7 +530,10 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
                 >
                   <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
                   <Controls position="top-left" showInteractive={false} />
-                  <MiniMap position="bottom-left" pannable zoomable className="!bg-card" />
+                  {/* Top-right keeps the minimap clear of the graph; hidden while the drawer shrinks the canvas. */}
+                  {!drawerOpen && (
+                    <MiniMap position="top-right" pannable zoomable className="!bg-card" />
+                  )}
                 </ReactFlow>
               </div>
               {!validation.valid && (

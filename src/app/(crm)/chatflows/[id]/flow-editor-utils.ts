@@ -60,12 +60,22 @@ export function toFlowGraph(nodes: EditorNode[], edges: EditorEdge[]): FlowGraph
   };
 }
 
-/** Left-to-right dagre layout preserving node ids and data. */
-export function autoLayout(nodes: EditorNode[], edges: EditorEdge[]): EditorNode[] {
+/** Dagre layout preserving node ids and data; enough separation that smoothstep edges route between cards. */
+export function autoLayout(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  options: { direction?: "LR" | "TB" } = {},
+): EditorNode[] {
   if (nodes.length === 0) return nodes;
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "LR", nodesep: 32, ranksep: 96, marginx: 24, marginy: 24 });
+  graph.setGraph({
+    rankdir: options.direction ?? "LR",
+    nodesep: 56,
+    ranksep: 130,
+    marginx: 24,
+    marginy: 24,
+  });
   for (const node of nodes) graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   for (const edge of edges) {
     if (
