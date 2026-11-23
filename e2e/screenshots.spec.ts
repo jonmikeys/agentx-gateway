@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import postgres from "postgres";
 import { navGroups } from "../src/components/app-shell/nav";
+import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
 import { type MediaSeed, seedMediaAndCameras } from "./media-seed";
 
@@ -31,6 +32,7 @@ const databaseUrl =
   "postgres://agentx:agentx@localhost:5432/agentx";
 const MOCK_MJPEG_PORT = Number(process.env.MOCK_MJPEG_PORT ?? 4020);
 const MOCK_VIDEO_PORT = Number(process.env.MOCK_VIDEO_PORT ?? 4030);
+const MOCK_MCP_PORT = Number(process.env.MOCK_MCP_PORT ?? 4312);
 // The one-time key shown in the "API key created" capture. Fixed so reruns are identical.
 const DEMO_API_KEY = `agx_${"x".repeat(32)}`;
 const themes = ["light", "dark"] as const;
@@ -42,12 +44,14 @@ interface Captured {
 const captured: Captured[] = [];
 
 let upstream: MockUpstream;
+let mcp: MockMcp;
 let mediaSeed: MediaSeed;
 let admin: APIRequestContext;
 let gateway: APIRequestContext;
 const demo = {
   reasoningSession: "",
   toolSession: "",
+  mcpSession: "",
   endedSession: "",
   failoverSession: "",
   responsesSession: "",
@@ -92,7 +96,50 @@ async function seedDemoData(): Promise<string> {
     providerIds[name] = (await response.json()).id;
   }
 
-  const routes: { slug: string; description: string; steps: [string, string][] }[] = [
+  // A demo MCP server whose tools are all allowed; the route selects two of them.
+  let mcpToolIds: string[] = [];
+  const mcpServers = (await existing("mcp-servers")) as { id: string; name: string }[];
+  let mcpServer = mcpServers.find((server) => server.name === "Composio");
+  if (!mcpServer) {
+    const response = await admin.post("/api/admin/mcp-servers", {
+      data: {
+        name: "Composio",
+        slug: "composio",
+        url: mcp.url,
+        transport: "streamable_http",
+        headers: { "x-api-key": "sk-demo-composio-not-a-real-key" },
+      },
+    });
+    expect(response.status()).toBe(201);
+    mcpServer = (await response.json()) as { id: string; name: string };
+  } else {
+    const response = await admin.patch(`/api/admin/mcp-servers/${mcpServer.id}`, {
+      data: { url: mcp.url },
+    });
+    expect(response.status()).toBe(200);
+  }
+  const refreshed = await admin.post(`/api/admin/mcp-servers/${mcpServer.id}/refresh-tools`);
+  expect(refreshed.status()).toBe(200);
+  const mcpTools = ((await refreshed.json()).data ?? []) as { id: string; name: string }[];
+  for (const tool of mcpTools) {
+    expect(
+      (
+        await admin.patch(`/api/admin/mcp-tools/${tool.id}`, {
+          data: { allowed: true },
+        })
+      ).status(),
+    ).toBe(200);
+  }
+  mcpToolIds = mcpTools
+    .filter((tool) => tool.name === "echo" || tool.name === "add")
+    .map((tool) => tool.id);
+
+  const routes: {
+    slug: string;
+    description: string;
+    steps: [string, string][];
+    mcp?: boolean;
+  }[] = [
     {
       slug: "avatar-default",
       description: "Default avatar conversation model with failover",
@@ -134,18 +181,47 @@ async function seedDemoData(): Promise<string> {
         ["DeepSeek", "echo"],
       ],
     },
+    {
+      slug: "avatar-mcp",
+      description: "Model that calls the allowed Composio echo and add MCP tools",
+      steps: [["OpenAI", "mcp-multi"]],
+      mcp: true,
+    },
   ];
+  const existingRoutes = (await existing("routes")) as unknown as {
+    id: string;
+    slug: string;
+    description: string;
+    enabled: boolean;
+    steps: { provider_id: string; upstream_model: string; timeout_ms: number }[];
+  }[];
   for (const route of routes) {
-    if ((await existing("routes")).some((entry) => entry.slug === route.slug)) continue;
+    const stepPayload = route.steps.map(([provider, model], index) => ({
+      provider_id: providerIds[provider],
+      upstream_model: model,
+      timeout_ms: index === 0 ? 20000 : 30000,
+    }));
+    const found = existingRoutes.find((entry) => entry.slug === route.slug);
+    if (found) {
+      if (!route.mcp) continue;
+      const response = await admin.put(`/api/admin/routes/${found.id}`, {
+        data: {
+          slug: found.slug,
+          description: found.description,
+          enabled: found.enabled,
+          steps: found.steps,
+          mcp_tool_ids: mcpToolIds,
+        },
+      });
+      expect(response.status()).toBe(200);
+      continue;
+    }
     const response = await admin.post("/api/admin/routes", {
       data: {
         slug: route.slug,
         description: route.description,
-        steps: route.steps.map(([provider, model], index) => ({
-          provider_id: providerIds[provider],
-          upstream_model: model,
-          timeout_ms: index === 0 ? 20000 : 30000,
-        })),
+        steps: stepPayload,
+        ...(route.mcp ? { mcp_tool_ids: mcpToolIds } : {}),
       },
     });
     expect(response.status()).toBe(201);
@@ -294,6 +370,14 @@ async function seedSessions() {
     await waitForRequests(toolFirst.id, 3);
     demo.toolSession = toolFirst.id;
 
+    // 2b. MCP tool loop: the gateway calls two MCP tools and answers in one client request.
+    const mcpResult = await converse("avatar-mcp", [
+      SYSTEM_PROMPT,
+      { role: "user", content: "Echo one, then add four and five." },
+    ]);
+    await waitForRequests(mcpResult.id, 1);
+    demo.mcpSession = mcpResult.id;
+
     // 3. Ended by an admin after two turns.
     const endedHistory: Message[] = [
       SYSTEM_PROMPT,
@@ -374,6 +458,7 @@ test.beforeAll(async () => {
     port: MOCK_PORT,
     models: ["ok", "mock-model", "gpt-demo"],
   });
+  mcp = await startMockMcp({ port: MOCK_MCP_PORT, slowMs: 500 });
   admin = await playwrightRequest.newContext({
     baseURL,
     httpCredentials: { username, password },
@@ -392,6 +477,7 @@ test.afterAll(async () => {
   await admin.dispose();
   await gateway.dispose();
   await upstream.close();
+  await mcp.close();
   await mediaSeed.close();
   const lines = [
     "# CRM screenshots",
@@ -628,6 +714,54 @@ for (const theme of themes) {
         "Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration",
         false,
         true,
+      );
+    });
+
+    test("state: session with MCP tool calls", async ({ page }) => {
+      await page.goto(`/sessions/${demo.mcpSession}`);
+      await expect(page.getByText("composio__echo").first()).toBeVisible();
+      await expect(
+        page.locator('[data-slot="badge"]').filter({ hasText: "MCP" }).first(),
+      ).toBeVisible();
+      await settle(page);
+      await page.getByText("composio__echo").first().scrollIntoViewIfNeeded();
+      await save(
+        page,
+        "state-session-mcp-tools",
+        "Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration",
+        false,
+        true,
+      );
+    });
+
+    test("state: MCP server dialog", async ({ page }) => {
+      await page.goto("/mcp");
+      await settle(page);
+      await page.getByRole("button", { name: "New MCP server" }).click();
+      await page.getByLabel("Name").fill("GitHub");
+      await page.getByLabel("Slug").fill("github");
+      await page.getByLabel("Server URL").fill("https://mcp.example.com/github");
+      await page.getByLabel("Headers").fill("x-api-key: demo-not-a-real-key");
+      await settleDialog(page);
+      await save(
+        page,
+        "state-mcp-server-dialog",
+        "MCP Servers: create dialog (headers are write-only and encrypted at rest)",
+        false,
+      );
+    });
+
+    test("state: MCP tools browser", async ({ page }) => {
+      await page.goto("/mcp");
+      await settle(page);
+      await page.getByRole("button", { name: "Browse tools for Composio" }).click();
+      await page.getByRole("button", { name: "Schema preview" }).first().click();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-mcp-tools-browser",
+        "MCP Servers: tools browser with allow switches and a JSON Schema preview",
+        false,
       );
     });
 

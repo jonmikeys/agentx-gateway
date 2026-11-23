@@ -5,6 +5,7 @@ import { makePng } from "../tests/support/media-files";
 import {
   cameraNames,
   keyLabel,
+  mcpServerName,
   mediaNames,
   providerNames,
   routeSlug,
@@ -145,6 +146,49 @@ for (const viewport of viewports) {
       await expect(testConnection).toBeFocused();
 
       const remove = page.getByRole("button", { name: `Delete ${providerNames.long}` });
+      await remove.click();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(remove).toBeFocused();
+    });
+
+    test("MCP server dialogs stay inside the dialog and return focus", async ({ page }) => {
+      await openPage(page, "/mcp");
+      await expectNoHorizontalScroll(page);
+
+      const newServer = page.getByRole("button", { name: "New MCP server" });
+      await newServer.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(newServer).toBeFocused();
+
+      const edit = page.getByRole("button", { name: `Edit ${mcpServerName}` });
+      await edit.click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(edit).toBeFocused();
+
+      const row = page.getByRole("row", { name: new RegExp(mcpServerName) });
+      const testConnection = row.getByRole("button", { name: "Test" });
+      await testConnection.click();
+      await expect(page.getByRole("heading", { name: "Connection succeeded" })).toBeVisible();
+      await expectDialogContained(page);
+      await page.keyboard.press("Escape");
+      await expect(testConnection).toBeFocused();
+
+      const browse = page.getByRole("button", { name: `Browse tools for ${mcpServerName}` });
+      await browse.click();
+      await expect(page.getByRole("heading", { name: new RegExp(mcpServerName) })).toBeVisible();
+      await page.getByRole("button", { name: "Schema preview" }).first().click();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(browse).toBeFocused();
+
+      const remove = page.getByRole("button", { name: `Delete ${mcpServerName}` });
       await remove.click();
       await expectDialogContained(page);
       await page.keyboard.press("Escape");

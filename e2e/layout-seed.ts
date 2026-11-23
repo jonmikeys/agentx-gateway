@@ -1,5 +1,6 @@
 import { type APIRequestContext, expect, request } from "@playwright/test";
 import { makePng } from "../tests/support/media-files";
+import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
 import { type MockMediaServer, startMockMediaServer } from "../tests/support/mock-media-server";
 import { type MockMjpeg, startMockMjpeg } from "../tests/support/mock-mjpeg";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
@@ -34,6 +35,8 @@ export const cameraNames = {
   unreachable: "Layout QA unreachable camera",
   lookAt: "Layout QA look-at sidecar",
 };
+export const mcpServerName =
+  "Layout QA MCP server with an extremely long display name that keeps going 123";
 export const CHAT_ROUTE = "layout-qa-failover";
 export const SESSION_IDS_ENV = "LAYOUT_QA_SESSION_IDS";
 
@@ -139,7 +142,66 @@ export interface SessionIds {
 }
 let mediaServer: MockMediaServer;
 let mjpeg: MockMjpeg;
+let mcp: MockMcp;
 const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
+
+/** Seeds a long-named MCP server, allows its tools and points the long route at one of them. */
+async function seedMcp(admin: APIRequestContext) {
+  const existing = ((await (await admin.get("/api/admin/mcp-servers")).json()).data ?? []) as {
+    id: string;
+    name: string;
+    slug: string;
+  }[];
+  let server = existing.find((entry) => entry.name === mcpServerName);
+  if (!server) {
+    const response = await admin.post("/api/admin/mcp-servers", {
+      data: {
+        name: mcpServerName,
+        slug: "layoutqamcp",
+        url: mcp.url,
+        transport: "streamable_http",
+        headers: { "x-api-key": "sk-layout-qa-mcp-not-a-real-key" },
+      },
+    });
+    expect(response.status()).toBe(201);
+    server = (await response.json()) as { id: string; name: string; slug: string };
+  } else {
+    const response = await admin.patch(`/api/admin/mcp-servers/${server.id}`, {
+      data: { url: mcp.url, transport: "streamable_http" },
+    });
+    expect(response.status()).toBe(200);
+  }
+  const refreshed = await admin.post(`/api/admin/mcp-servers/${server.id}/refresh-tools`);
+  expect(refreshed.status()).toBe(200);
+  const tools = ((await refreshed.json()).data ?? []) as { id: string; name: string }[];
+  for (const tool of tools) {
+    const response = await admin.patch(`/api/admin/mcp-tools/${tool.id}`, {
+      data: { allowed: true },
+    });
+    expect(response.status()).toBe(200);
+  }
+  const routes = ((await (await admin.get("/api/admin/routes")).json()).data ?? []) as {
+    id: string;
+    slug: string;
+    description: string;
+    enabled: boolean;
+    steps: { provider_id: string; upstream_model: string; timeout_ms: number }[];
+  }[];
+  const route = routes.find((entry) => entry.slug === routeSlug);
+  if (route) {
+    // Reuse the long route but make it carry a long MCP tool name in the editor picker.
+    const response = await admin.put(`/api/admin/routes/${route.id}`, {
+      data: {
+        slug: route.slug,
+        description: route.description,
+        enabled: route.enabled,
+        steps: route.steps,
+        mcp_tool_ids: tools.map((tool) => tool.id),
+      },
+    });
+    expect(response.status()).toBe(200);
+  }
+}
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
   const list = async (collection: string) =>
@@ -361,9 +423,11 @@ export default async function globalSetup() {
   const upstream = await startMockUpstream({ models: ["ok", "mock-model"] });
   mediaServer = await startMockMediaServer();
   mjpeg = await startMockMjpeg({ frameIntervalMs: 50 });
+  mcp = await startMockMcp({ slowMs: 500 });
   const admin = await request.newContext({ baseURL, httpCredentials: { username, password } });
   try {
     await seed(admin, upstream);
+    await seedMcp(admin);
     await seedMediaAndCameras(admin);
     await seedSessions(admin, baseURL);
   } finally {
@@ -374,5 +438,6 @@ export default async function globalSetup() {
     await upstream.close();
     await mediaServer.close();
     await mjpeg.close();
+    await mcp.close();
   };
 }
