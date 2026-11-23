@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,6 +47,7 @@ import { Switch } from "@/components/ui/switch";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
 import { routeWriteSchema } from "@/lib/gateway-schemas";
 import type { ProviderTestResult } from "@/server/gateway/provider-test";
+import type { McpToolView } from "@/server/services/mcp";
 import type { ProviderView } from "@/server/services/providers";
 import type { RouteView } from "@/server/services/routes";
 
@@ -65,6 +67,7 @@ const formSchema = z.object({
       }),
     )
     .min(1, "Add at least one step"),
+  mcp_tool_ids: z.array(z.string()),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -217,12 +220,15 @@ export function RouteEditorDialog({
   open,
   route,
   providers,
+  mcpTools,
   onOpenChange,
 }: {
   open: boolean;
   /** The route being edited, or undefined to create one. */
   route?: RouteView;
   providers: ProviderView[];
+  /** Allowed MCP tools on enabled servers, for the picker. */
+  mcpTools: McpToolView[];
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
@@ -233,13 +239,32 @@ export function RouteEditorDialog({
     control,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { slug: "", description: "", enabled: true, steps: [newStep()] },
+    defaultValues: {
+      slug: "",
+      description: "",
+      enabled: true,
+      steps: [newStep()],
+      mcp_tool_ids: [],
+    },
   });
   const { fields, append, remove, move } = useFieldArray({ control, name: "steps" });
   const watchedSteps = useWatch({ control, name: "steps" });
+  const selectedToolIds = useWatch({ control, name: "mcp_tool_ids" }) ?? [];
+  const toolsByServer = new Map<string, McpToolView[]>();
+  for (const tool of mcpTools) {
+    toolsByServer.set(tool.server_name, [...(toolsByServer.get(tool.server_name) ?? []), tool]);
+  }
+
+  function toggleTool(id: string, checked: boolean) {
+    const next = checked
+      ? [...new Set([...selectedToolIds, id])]
+      : selectedToolIds.filter((value) => value !== id);
+    setValue("mcp_tool_ids", next, { shouldDirty: true });
+  }
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -273,8 +298,15 @@ export function RouteEditorDialog({
               upstream_model: step.upstream_model,
               timeout_ms: String(step.timeout_ms),
             })),
+            mcp_tool_ids: route.mcp_tool_ids,
           }
-        : { slug: "", description: "", enabled: true, steps: [newStep()] },
+        : {
+            slug: "",
+            description: "",
+            enabled: true,
+            steps: [newStep()],
+            mcp_tool_ids: [],
+          },
     );
     for (const step of route?.steps ?? []) void loadModels(step.provider_id);
   }, [open, route, reset, loadModels]);
@@ -300,6 +332,7 @@ export function RouteEditorDialog({
         upstream_model: step.upstream_model,
         timeout_ms: Number(step.timeout_ms),
       })),
+      mcp_tool_ids: values.mcp_tool_ids,
     };
     try {
       await adminFetch(route ? `routes/${route.id}` : "routes", {
@@ -394,6 +427,41 @@ export function RouteEditorDialog({
               </DndContext>
               {errors.steps?.root && <FieldError errors={[errors.steps.root]} />}
               {errors.steps?.message && <FieldError>{errors.steps.message}</FieldError>}
+            </div>
+            <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-medium">MCP tools</h3>
+                <Badge variant="outline">{selectedToolIds.length} selected</Badge>
+              </div>
+              <FieldDescription>
+                Allowed MCP tools the model may call on this route. Allow tools on the MCP Servers
+                page first; the gateway executes them and loops back to the model.
+              </FieldDescription>
+              {mcpTools.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                  No allowed MCP tools yet. Open MCP Servers to fetch tools and allow them.
+                </p>
+              ) : (
+                <div className="flex max-h-64 flex-col gap-3 overflow-y-auto rounded-lg border p-3">
+                  {[...toolsByServer.entries()].map(([server, serverTools]) => (
+                    <div key={server} className="flex flex-col gap-1.5">
+                      <div className="text-xs font-medium text-muted-foreground">{server}</div>
+                      {serverTools.map((tool) => (
+                        <div key={tool.id} className="flex items-center gap-2 text-sm">
+                          <Switch
+                            aria-label={`Offer ${tool.exposed_name} on this route`}
+                            checked={selectedToolIds.includes(tool.id)}
+                            onCheckedChange={(checked) => toggleTool(tool.id, checked)}
+                          />
+                          <span className="min-w-0 truncate font-mono text-xs">
+                            {tool.exposed_name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </FieldGroup>
           <DialogFooter>

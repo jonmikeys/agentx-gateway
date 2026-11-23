@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+﻿import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   type APIRequestContext,
@@ -6,9 +6,12 @@ import {
   request as playwrightRequest,
   test,
 } from "@playwright/test";
+import dagre from "dagre";
 import postgres from "postgres";
 import { navGroups } from "../src/components/app-shell/nav";
+import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
+import { type MockWebhook, startMockWebhook } from "../tests/support/mock-webhook";
 import { type MediaSeed, seedMediaAndCameras } from "./media-seed";
 
 /**
@@ -31,6 +34,8 @@ const databaseUrl =
   "postgres://agentx:agentx@localhost:5432/agentx";
 const MOCK_MJPEG_PORT = Number(process.env.MOCK_MJPEG_PORT ?? 4020);
 const MOCK_VIDEO_PORT = Number(process.env.MOCK_VIDEO_PORT ?? 4030);
+const MOCK_MCP_PORT = Number(process.env.MOCK_MCP_PORT ?? 4312);
+const MOCK_WEBHOOK_PORT = Number(process.env.MOCK_WEBHOOK_PORT ?? 4513);
 // The one-time key shown in the "API key created" capture. Fixed so reruns are identical.
 const DEMO_API_KEY = `agx_${"x".repeat(32)}`;
 const themes = ["light", "dark"] as const;
@@ -42,15 +47,24 @@ interface Captured {
 const captured: Captured[] = [];
 
 let upstream: MockUpstream;
+let mcp: MockMcp;
+let webhook: MockWebhook;
 let mediaSeed: MediaSeed;
 let admin: APIRequestContext;
 let gateway: APIRequestContext;
 const demo = {
   reasoningSession: "",
   toolSession: "",
+  mcpSession: "",
   endedSession: "",
   failoverSession: "",
   responsesSession: "",
+  agentFlow: "",
+  agentSession: "",
+  extrasFlow: "",
+  subflow: "",
+  callerFlow: "",
+  versionFlow: "",
 };
 
 type Message = Record<string, unknown>;
@@ -92,7 +106,50 @@ async function seedDemoData(): Promise<string> {
     providerIds[name] = (await response.json()).id;
   }
 
-  const routes: { slug: string; description: string; steps: [string, string][] }[] = [
+  // A demo MCP server whose tools are all allowed; the route selects two of them.
+  let mcpToolIds: string[] = [];
+  const mcpServers = (await existing("mcp-servers")) as { id: string; name: string }[];
+  let mcpServer = mcpServers.find((server) => server.name === "Composio");
+  if (!mcpServer) {
+    const response = await admin.post("/api/admin/mcp-servers", {
+      data: {
+        name: "Composio",
+        slug: "composio",
+        url: mcp.url,
+        transport: "streamable_http",
+        headers: { "x-api-key": "sk-demo-composio-not-a-real-key" },
+      },
+    });
+    expect(response.status()).toBe(201);
+    mcpServer = (await response.json()) as { id: string; name: string };
+  } else {
+    const response = await admin.patch(`/api/admin/mcp-servers/${mcpServer.id}`, {
+      data: { url: mcp.url },
+    });
+    expect(response.status()).toBe(200);
+  }
+  const refreshed = await admin.post(`/api/admin/mcp-servers/${mcpServer.id}/refresh-tools`);
+  expect(refreshed.status()).toBe(200);
+  const mcpTools = ((await refreshed.json()).data ?? []) as { id: string; name: string }[];
+  for (const tool of mcpTools) {
+    expect(
+      (
+        await admin.patch(`/api/admin/mcp-tools/${tool.id}`, {
+          data: { allowed: true },
+        })
+      ).status(),
+    ).toBe(200);
+  }
+  mcpToolIds = mcpTools
+    .filter((tool) => tool.name === "echo" || tool.name === "add")
+    .map((tool) => tool.id);
+
+  const routes: {
+    slug: string;
+    description: string;
+    steps: [string, string][];
+    mcp?: boolean;
+  }[] = [
     {
       slug: "avatar-default",
       description: "Default avatar conversation model with failover",
@@ -134,18 +191,47 @@ async function seedDemoData(): Promise<string> {
         ["DeepSeek", "echo"],
       ],
     },
+    {
+      slug: "avatar-mcp",
+      description: "Model that calls the allowed Composio echo and add MCP tools",
+      steps: [["OpenAI", "mcp-multi"]],
+      mcp: true,
+    },
   ];
+  const existingRoutes = (await existing("routes")) as unknown as {
+    id: string;
+    slug: string;
+    description: string;
+    enabled: boolean;
+    steps: { provider_id: string; upstream_model: string; timeout_ms: number }[];
+  }[];
   for (const route of routes) {
-    if ((await existing("routes")).some((entry) => entry.slug === route.slug)) continue;
+    const stepPayload = route.steps.map(([provider, model], index) => ({
+      provider_id: providerIds[provider],
+      upstream_model: model,
+      timeout_ms: index === 0 ? 20000 : 30000,
+    }));
+    const found = existingRoutes.find((entry) => entry.slug === route.slug);
+    if (found) {
+      if (!route.mcp) continue;
+      const response = await admin.put(`/api/admin/routes/${found.id}`, {
+        data: {
+          slug: found.slug,
+          description: found.description,
+          enabled: found.enabled,
+          steps: found.steps,
+          mcp_tool_ids: mcpToolIds,
+        },
+      });
+      expect(response.status()).toBe(200);
+      continue;
+    }
     const response = await admin.post("/api/admin/routes", {
       data: {
         slug: route.slug,
         description: route.description,
-        steps: route.steps.map(([provider, model], index) => ({
-          provider_id: providerIds[provider],
-          upstream_model: model,
-          timeout_ms: index === 0 ? 20000 : 30000,
-        })),
+        steps: stepPayload,
+        ...(route.mcp ? { mcp_tool_ids: mcpToolIds } : {}),
       },
     });
     expect(response.status()).toBe(201);
@@ -216,9 +302,421 @@ async function resetDemoSessions() {
     await database`delete from llm_requests`;
     await database`delete from sessions`;
     await database`delete from api_keys where label in ('Lobby kiosk', 'Lobby kiosk (extra)')`;
+    await database`delete from flows`;
+    await database`delete from media_items`;
+    await database`delete from cameras`;
   } finally {
     await database.end();
   }
+}
+
+/** Creates and publishes the demo agent (Start, Router intent, Webhook, Memory, LLM, Reply). */
+async function seedAgentFlow(): Promise<string> {
+  const created = await admin.post("/api/admin/flows", {
+    data: {
+      name: "Lobby greeter",
+      slug: "lobby-greeter",
+      description: "Checks the lobby status through a webhook, remembers it and answers as Aiko.",
+      enabled: true,
+      settings: { default_route_slug: "avatar-echo" },
+    },
+  });
+  expect(created.status()).toBe(201);
+  const flow = (await created.json()) as { id: string };
+  const start = {
+    id: "start",
+    type: "start",
+    position: { x: 300, y: 0 },
+    data: { title: "Start" },
+  };
+  const router = {
+    id: "router",
+    type: "router",
+    position: { x: 300, y: 120 },
+    data: {
+      title: "Which request?",
+      mode: "intent",
+      model: "avatar-echo",
+      intentLabels: ["smalltalk"],
+      intentInstruction: "Pick smalltalk for greetings, otherwise answer with the default.",
+      defaultLabel: "info",
+      rules: [],
+    },
+  };
+  const webhookNode = {
+    id: "hook",
+    type: "webhook",
+    position: { x: 300, y: 260 },
+    data: {
+      title: "Check lobby status",
+      method: "GET",
+      url: `http://127.0.0.1:${MOCK_WEBHOOK_PORT}/hook`,
+      headers: [],
+      bodyTemplate: "",
+      timeoutMs: 5000,
+      retries: 1,
+      maxResponseBytes: 65536,
+      mappings: [{ variable: "hook_value", path: "data.value" }],
+      outputVariable: "hook_payload",
+    },
+  };
+  const memory = {
+    id: "remember_memory",
+    type: "memory",
+    position: { x: 300, y: 380 },
+    data: {
+      title: "Remember status",
+      operation: "set",
+      key: "last_hook",
+      value: "{{vars.hook_value}}",
+      outputVariable: "saved",
+    },
+  };
+  const llm = {
+    id: "llm",
+    type: "llm",
+    position: { x: 300, y: 500 },
+    data: {
+      title: "Write the answer",
+      model: "inherit",
+      systemPrompt: "You are Aiko, a friendly lobby greeter. Keep the answer to one sentence.",
+      history: "full",
+      historyLimit: 10,
+      mcpToolIds: [],
+      outputVariable: "llm_output",
+      stream: true,
+    },
+  };
+  const reply = {
+    id: "reply",
+    type: "reply",
+    position: { x: 300, y: 620 },
+    data: {
+      title: "Lobby answer",
+      template: "Aiko checked the lobby: {{vars.hook_value}}. {{vars.llm_output}}",
+    },
+  };
+  const smalltalk = {
+    id: "smalltalk",
+    type: "reply",
+    position: { x: 40, y: 260 },
+    data: { title: "Greeting", template: "Hi there! Ask me about the lobby." },
+  };
+  const end = { id: "end", type: "end", position: { x: 300, y: 740 }, data: { title: "End" } };
+  const graph = {
+    nodes: [start, router, webhookNode, memory, llm, reply, smalltalk, end],
+    edges: [
+      { id: "e1", source: "start", target: "router", sourceHandle: "out", type: "smoothstep" },
+      {
+        id: "e2",
+        source: "router",
+        target: "smalltalk",
+        sourceHandle: "intent:smalltalk",
+        type: "smoothstep",
+      },
+      { id: "e3", source: "router", target: "hook", sourceHandle: "default", type: "smoothstep" },
+      {
+        id: "e4",
+        source: "hook",
+        target: "remember_memory",
+        sourceHandle: "out",
+        type: "smoothstep",
+      },
+      { id: "e5", source: "hook", target: "llm", sourceHandle: "error", type: "smoothstep" },
+      {
+        id: "e6",
+        source: "remember_memory",
+        target: "llm",
+        sourceHandle: "out",
+        type: "smoothstep",
+      },
+      { id: "e7", source: "llm", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e8", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+      { id: "e9", source: "smalltalk", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  // Dagre lays the demo out top-to-bottom with generous separation so smoothstep edges route
+  // between cards instead of cutting across them.
+  const layout = new dagre.graphlib.Graph();
+  layout.setDefaultEdgeLabel(() => ({}));
+  layout.setGraph({ rankdir: "TB", nodesep: 70, ranksep: 110, marginx: 40, marginy: 40 });
+  for (const node of graph.nodes) layout.setNode(node.id, { width: 232, height: 104 });
+  for (const edge of graph.edges) layout.setEdge(edge.source, edge.target);
+  dagre.layout(layout);
+  for (const node of graph.nodes) {
+    const placed = layout.node(node.id);
+    node.position = { x: Math.round(placed.x - 116), y: Math.round(placed.y - 52) };
+  }
+  const drafted = await admin.put(`/api/admin/flows/${flow.id}/draft`, { data: { graph } });
+  expect(drafted.status()).toBe(200);
+  const published = await admin.post(`/api/admin/flows/${flow.id}/publish`, {
+    data: { note: "Demo agent" },
+  });
+  expect(published.status()).toBe(201);
+  return flow.id;
+}
+async function createDemoFlow(data: Record<string, unknown>): Promise<string> {
+  const response = await admin.post("/api/admin/flows", { data });
+  expect(response.status()).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/**
+ * Seeds the G7b editor extras: a Client Action + sticky note + group + comment, a published
+ * subflow, a caller pinned to its first version (so the "update available" badge shows) and a
+ * flow with a published version plus a changed draft for the version compare view.
+ */
+async function seedG7bFlows() {
+  const media = (await (await admin.get("/api/admin/media")).json()).data as {
+    id: string;
+    name: string;
+  }[];
+  const mediaId = media.find((entry) => entry.name === "Sunset")?.id ?? media[0]?.id;
+  expect(mediaId).toBeTruthy();
+
+  // --- extras agent: Client Action, sticky note, group and a node comment ---------------------
+  const extras = await createDemoFlow({
+    name: "Lobby extras demo",
+    slug: "lobby-extras-demo",
+    description: "Shows a picture with a Client Action, with an editor note and a visual group.",
+    enabled: false,
+  });
+  const extrasGraph = {
+    nodes: [
+      {
+        id: "start",
+        type: "start",
+        position: { x: 0, y: 0 },
+        data: {
+          title: "Start",
+          comment: "Greets visitors at the front desk.",
+          commentUpdatedAt: "2026-11-01T09:15:00.000Z",
+        },
+      },
+      {
+        id: "show_photo",
+        type: "client_action",
+        position: { x: 0, y: 160 },
+        data: {
+          title: "Show the lobby picture",
+          toolName: "show_image",
+          argsTemplate: `{\n  "media_id": "${mediaId}"\n}`,
+          outputVariable: "client_result",
+        },
+      },
+      {
+        id: "group_replies",
+        type: "group",
+        position: { x: 0, y: 320 },
+        width: 300,
+        height: 180,
+        zIndex: -1,
+        data: { title: "Front desk replies", color: "blue", collapsed: false },
+      },
+      {
+        id: "reply",
+        type: "reply",
+        parentId: "group_replies",
+        position: { x: 30, y: 40 },
+        data: {
+          title: "Aiko's reply",
+          template: "Here is the lobby picture you asked for.",
+        },
+      },
+      { id: "end", type: "end", position: { x: 0, y: 540 }, data: { title: "End" } },
+      {
+        id: "note_1",
+        type: "note",
+        position: { x: 360, y: 160 },
+        width: 280,
+        height: 200,
+        zIndex: 1,
+        data: {
+          title: "Editor note",
+          markdown:
+            "**Canvas-only helpers**\n\n- Sticky notes hold Markdown\n- Groups move their children\n- Comments open from the speech bubble",
+          color: "yellow",
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "show_photo", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "show_photo", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e3", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${extras}/draft`, { data: { graph: extrasGraph } })
+    ).status(),
+  ).toBe(200);
+  demo.extrasFlow = extras;
+
+  // --- subflow: one input, one output ----------------------------------------------------------
+  const subflow = await createDemoFlow({
+    name: "Lobby topic lookup",
+    slug: "lobby-topic-lookup",
+    description: "Answers a visitor question about a lobby topic.",
+    kind: "subflow",
+    enabled: true,
+  });
+  const subflowGraph = {
+    nodes: [
+      {
+        id: "in",
+        type: "subflow_input",
+        position: { x: 0, y: 0 },
+        data: { title: "Input", params: [{ name: "topic", type: "string", required: true }] },
+      },
+      {
+        id: "say",
+        type: "reply",
+        position: { x: 300, y: 0 },
+        data: { title: "Topic answer", template: "You asked about {{vars.topic}}." },
+      },
+      {
+        id: "out",
+        type: "subflow_output",
+        position: { x: 600, y: 0 },
+        data: {
+          title: "Answer",
+          label: "answer",
+          values: [{ name: "summary", value: "{{nodes.say.output}}" }],
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "in", target: "say", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "say", target: "out", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${subflow}/draft`, { data: { graph: subflowGraph } })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${subflow}/publish`, { data: { note: "Demo subflow v1" } })
+    ).status(),
+  ).toBe(201);
+  demo.subflow = subflow;
+
+  // --- caller pinned to subflow v1, then the subflow moves to v2 -------------------------------
+  const caller = await createDemoFlow({
+    name: "Lobby subflow caller",
+    slug: "lobby-subflow-caller",
+    description: "Calls the topic lookup subflow and answers with its result.",
+    enabled: false,
+  });
+  const callerGraph = {
+    nodes: [
+      { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+      {
+        id: "call",
+        type: "call_subflow",
+        position: { x: 0, y: 160 },
+        data: {
+          title: "Look up the topic",
+          subflowId: subflow,
+          subflowName: "Lobby topic lookup",
+          inputs: [{ name: "topic", value: "{{input.text}}" }],
+          outputs: [{ label: "answer", variable: "topic_answer" }],
+        },
+      },
+      {
+        id: "reply",
+        type: "reply",
+        position: { x: 0, y: 320 },
+        data: { title: "Answer the visitor", template: "{{vars.topic_answer}}" },
+      },
+      { id: "end", type: "end", position: { x: 0, y: 480 }, data: { title: "End" } },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "call", sourceHandle: "out", type: "smoothstep" },
+      {
+        id: "e2",
+        source: "call",
+        target: "reply",
+        sourceHandle: "out:answer",
+        type: "smoothstep",
+      },
+      { id: "e3", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (
+      await admin.put(`/api/admin/flows/${caller}/draft`, { data: { graph: callerGraph } })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${caller}/publish`, { data: { note: "Pins v1" } })
+    ).status(),
+  ).toBe(201);
+  demo.callerFlow = caller;
+  // A newer published subflow version makes the caller's Call Subflow node show "Update v1 -> v2".
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${subflow}/publish`, { data: { note: "Demo subflow v2" } })
+    ).status(),
+  ).toBe(201);
+
+  // --- version compare: a published v1 and a changed draft -------------------------------------
+  const version = await createDemoFlow({
+    name: "Lobby version compare",
+    slug: "lobby-version-compare",
+    description: "A published flow whose draft has since changed.",
+    enabled: false,
+  });
+  const starter = {
+    nodes: [
+      { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+      {
+        id: "reply",
+        type: "reply",
+        position: { x: 260, y: 0 },
+        data: { title: "Greeting", template: "Hi! How can I help?" },
+      },
+      { id: "end", type: "end", position: { x: 520, y: 0 }, data: { title: "End" } },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "reply", sourceHandle: "out", type: "smoothstep" },
+      { id: "e2", source: "reply", target: "end", sourceHandle: "out", type: "smoothstep" },
+    ],
+  };
+  expect(
+    (await admin.put(`/api/admin/flows/${version}/draft`, { data: { graph: starter } })).status(),
+  ).toBe(200);
+  expect(
+    (
+      await admin.post(`/api/admin/flows/${version}/publish`, { data: { note: "Before edits" } })
+    ).status(),
+  ).toBe(201);
+  const changed = {
+    nodes: [
+      starter.nodes[0],
+      {
+        ...starter.nodes[1],
+        data: { title: "Greeting", template: "Hi there! Ask me about the lobby." },
+      },
+      starter.nodes[2],
+      {
+        id: "note_diff",
+        type: "note",
+        position: { x: 0, y: 180 },
+        width: 260,
+        height: 140,
+        zIndex: 1,
+        data: { title: "New note", markdown: "Added after publishing.", color: "green" },
+      },
+    ],
+    edges: starter.edges,
+  };
+  expect(
+    (await admin.put(`/api/admin/flows/${version}/draft`, { data: { graph: changed } })).status(),
+  ).toBe(200);
+  demo.versionFlow = version;
 }
 
 /** Seeds sessions by sending real requests, then backdates demo history for the charts. */
@@ -294,6 +792,14 @@ async function seedSessions() {
     await waitForRequests(toolFirst.id, 3);
     demo.toolSession = toolFirst.id;
 
+    // 2b. MCP tool loop: the gateway calls two MCP tools and answers in one client request.
+    const mcpResult = await converse("avatar-mcp", [
+      SYSTEM_PROMPT,
+      { role: "user", content: "Echo one, then add four and five." },
+    ]);
+    await waitForRequests(mcpResult.id, 1);
+    demo.mcpSession = mcpResult.id;
+
     // 3. Ended by an admin after two turns.
     const endedHistory: Message[] = [
       SYSTEM_PROMPT,
@@ -333,6 +839,27 @@ async function seedSessions() {
     await waitForRequests(responsesFirst.id, 2);
     demo.responsesSession = responsesFirst.id;
 
+    // 4c. Agent run: Start, Router intent, Webhook, Memory, LLM and Reply.
+    const agent = await gateway.post("/v1/chat/completions", {
+      data: {
+        agent_id: demo.agentFlow,
+        stream: true,
+        messages: [
+          SYSTEM_PROMPT,
+          { role: "user", content: "Hello, can you check the lobby status?" },
+        ],
+      },
+    });
+    expect(agent.status()).toBe(200);
+    await agent.text();
+    demo.agentSession = agent.headers()["x-session-id"] as string;
+    await waitForRequests(demo.agentSession, 1);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [row] =
+        await database`select count(*)::int as n from run_logs where session_id = ${demo.agentSession}`;
+      if (row.n > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     // 5. Standalone one-shot helper call (idle-expired and flagged by the sweeper).
     const oneShot = await converse("avatar-echo", [
       { role: "user", content: "Write a three word title for this conversation." },
@@ -374,6 +901,8 @@ test.beforeAll(async () => {
     port: MOCK_PORT,
     models: ["ok", "mock-model", "gpt-demo"],
   });
+  mcp = await startMockMcp({ port: MOCK_MCP_PORT, slowMs: 500 });
+  webhook = await startMockWebhook({ port: MOCK_WEBHOOK_PORT });
   admin = await playwrightRequest.newContext({
     baseURL,
     httpCredentials: { username, password },
@@ -384,14 +913,18 @@ test.beforeAll(async () => {
     baseURL,
     extraHTTPHeaders: { Authorization: `Bearer ${clientKey}` },
   });
-  await seedSessions();
+  demo.agentFlow = await seedAgentFlow();
   mediaSeed = await seedMediaAndCameras(admin, { mjpeg: MOCK_MJPEG_PORT, video: MOCK_VIDEO_PORT });
+  await seedG7bFlows();
+  await seedSessions();
 });
 
 test.afterAll(async () => {
   await admin.dispose();
   await gateway.dispose();
   await upstream.close();
+  await mcp.close();
+  await webhook.close();
   await mediaSeed.close();
   const lines = [
     "# CRM screenshots",
@@ -431,6 +964,17 @@ for (const theme of themes) {
       await page.evaluate(() => document.fonts.ready);
       // Charts animate in; wait for them to finish before capturing.
       await page.waitForTimeout(800);
+    }
+
+    /**
+     * Fits the flow before settling. Fit before the animation-disabling CSS goes in: React Flow
+     * applies the viewport through a transition, so disabling transitions first makes fit a no-op.
+     */
+    async function settleCanvas(page: import("@playwright/test").Page) {
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("rf__controls").getByRole("button", { name: "Fit View" }).click();
+      await page.waitForTimeout(400);
+      await settle(page);
     }
 
     /** Dialogs must be fully open and no closing dialog or overlay may remain stacked behind. */
@@ -560,6 +1104,291 @@ for (const theme of themes) {
       );
     });
 
+    test("state: API reference", async ({ page }) => {
+      await page.goto("/docs");
+      await page.waitForLoadState("networkidle");
+      const operation = page.getByRole("heading", { name: "Create a chat completion" });
+      await operation.scrollIntoViewIfNeeded();
+      await expect(operation).toBeInViewport();
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-api-reference",
+        "API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in",
+        false,
+        true,
+      );
+    });
+
+    test("state: chatflow editor canvas", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.agentFlow}`);
+      await expect(page.getByRole("heading", { name: "Lobby greeter", level: 1 })).toBeVisible();
+      await expect(page.getByTestId("flow-node-llm")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-editor",
+        "Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout",
+        false,
+      );
+    });
+
+    test("state: chatflow properties panel", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.agentFlow}`);
+      await expect(page.getByTestId("flow-node-router")).toBeVisible();
+      await page.locator('[data-node-type="router"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByText("Intent labels")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-properties",
+        "Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates)",
+        false,
+      );
+    });
+
+    test("state: chatflow publish dialog", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.agentFlow}`);
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Publish", exact: true }).click();
+      await expect(page.getByText("Validation passed.")).toBeVisible();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-publish",
+        "Chatflow editor: publish dialog with validation results and a version note",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow version history", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.agentFlow}`);
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Versions", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
+      await page.getByRole("button", { name: "View version 1" }).click();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-versions",
+        "Chatflow editor: version history with a published version preview and restore",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow test drawer with trace", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.agentFlow}`);
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Open test drawer" }).click();
+      await page
+        .getByRole("textbox", { name: "Test message" })
+        .fill("Hello, can you check the lobby status?");
+      await page.getByRole("button", { name: "Run test message" }).click();
+      await page.getByRole("button", { name: "Trace" }).last().click();
+      await expect(page.getByTestId("test-trace")).toContainText("Lobby answer", {
+        timeout: 30_000,
+      });
+      await expect(page.getByTestId("test-trace")).toContainText("Check lobby status");
+      await settle(page);
+      await save(
+        page,
+        "state-chatflow-test-trace",
+        "Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node)",
+        false,
+      );
+      await page.getByRole("button", { name: "Close test drawer" }).click();
+    });
+
+    test("state: chatflow Client Action properties", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.getByTestId("flow-node-show_photo")).toBeVisible();
+      await page.locator('[data-node-type="client_action"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByLabel("Client tool")).toBeVisible();
+      await expect(page.getByLabel("Media item")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-client-action",
+        "Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template)",
+        false,
+      );
+    });
+
+    test("state: chatflow sticky notes and group", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.locator('[data-node-type="note"]')).toBeVisible();
+      await expect(page.locator('[data-node-type="group"]')).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-notes-group",
+        "Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed",
+        false,
+      );
+    });
+
+    test("state: chatflow comment popover", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await expect(page.getByTestId("flow-node-start")).toBeVisible();
+      await settleCanvas(page);
+      // Dispatch the click: the node can sit under the canvas overlay when the graph is small.
+      await page
+        .getByRole("button", { name: "Show comment" })
+        .first()
+        .evaluate((element) => (element as HTMLElement).click());
+      await expect(page.getByText(/Last edited/)).toBeVisible();
+      await save(
+        page,
+        "state-chatflow-comment",
+        "Chatflow editor: the node comment popover with the last-edited time",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow subflow editor", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.subflow}`);
+      await expect(
+        page.getByRole("heading", { name: "Lobby topic lookup", level: 1 }),
+      ).toBeVisible();
+      await expect(page.getByTestId("flow-node-in")).toBeVisible();
+      await expect(page.getByTestId("flow-node-out")).toBeVisible();
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-subflow",
+        "Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output",
+        false,
+      );
+    });
+
+    test("state: chatflow Call Subflow update badge", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.callerFlow}`);
+      await expect(page.getByTestId("flow-node-call")).toBeVisible();
+      await expect(page.getByTestId("node-badge")).toContainText("Update v1 → v2");
+      await settleCanvas(page);
+      await save(
+        page,
+        "state-chatflow-call-subflow",
+        'Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published',
+        false,
+      );
+    });
+
+    test("state: chatflow version compare", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.versionFlow}`);
+      await expect(
+        page.getByRole("heading", { name: "Lobby version compare", level: 1 }),
+      ).toBeVisible();
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Versions", exact: true }).click();
+      await page.getByRole("button", { name: "View version 1" }).click();
+      await page.getByRole("button", { name: "Compare with draft" }).click();
+      await expect(page.getByTestId("version-diff")).toBeVisible();
+      await expect(page.getByText("Added nodes")).toBeVisible();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-version-compare",
+        "Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow import with re-link", async ({ page }) => {
+      const payload = {
+        format: "agentx.chatflow",
+        format_version: 1,
+        flow: {
+          name: "Imported lobby flow",
+          kind: "agent",
+          description: "Imported from JSON; webhook headers need re-linking.",
+          settings: { default_route_slug: null, allowed_media_tags: [], allowed_cameras: [] },
+        },
+        graph: {
+          nodes: [
+            { id: "start", type: "start", position: { x: 0, y: 0 }, data: { title: "Start" } },
+            {
+              id: "hook",
+              type: "webhook",
+              position: { x: 260, y: 0 },
+              data: {
+                title: "Notify the desk",
+                method: "POST",
+                url: "https://lobby.internal/notify",
+                headers: [{ name: "X-Api-Key" }],
+                bodyTemplate: "",
+                timeoutMs: 10_000,
+                retries: 0,
+                maxResponseBytes: 65_536,
+                mappings: [],
+                outputVariable: "hook",
+              },
+            },
+            { id: "end", type: "end", position: { x: 520, y: 0 }, data: { title: "End" } },
+          ],
+          edges: [
+            { id: "e1", source: "start", target: "hook", sourceHandle: "out" },
+            { id: "e2", source: "hook", target: "end", sourceHandle: "out" },
+          ],
+        },
+      };
+      await page.goto("/chatflows");
+      await settle(page);
+      await page.getByRole("button", { name: "Import JSON" }).click();
+      await page.getByLabel("Imported chatflow JSON").fill(JSON.stringify(payload));
+      await page.getByRole("button", { name: "Import chatflow" }).click();
+      await expect(page.getByText("Re-link these webhook headers:")).toBeVisible();
+      await expect(page.getByLabel("Webhook headers to re-link")).toContainText("X-Api-Key");
+      await settleDialog(page);
+      await save(
+        page,
+        "state-chatflow-import",
+        "Chatflows: the JSON import dialog listing the webhook headers that must be re-linked",
+        false,
+      );
+      await page.keyboard.press("Escape");
+    });
+
+    test("state: chatflow paused for client trace", async ({ page }) => {
+      await page.goto(`/chatflows/${demo.extrasFlow}`);
+      await settleCanvas(page);
+      await page.getByRole("button", { name: "Open test drawer" }).click();
+      await page.getByRole("textbox", { name: "Test message" }).fill("Show me the lobby.");
+      await page.getByRole("button", { name: "Run test message" }).click();
+      await page.getByRole("button", { name: "Trace" }).last().click();
+      await expect(page.getByTestId("test-trace")).toContainText("Paused (waiting for client)", {
+        timeout: 30_000,
+      });
+      await settle(page);
+      await save(
+        page,
+        "state-chatflow-paused-trace",
+        "Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result",
+        false,
+      );
+      await page.getByRole("button", { name: "Close test drawer" }).click();
+    });
+
+    test("state: transcript with an agent run trace", async ({ page }) => {
+      await page.goto(`/sessions/${demo.agentSession}`);
+      await expect(page.getByText("Agent run trace")).toBeVisible();
+      await page
+        .getByRole("button", { name: /Lobby greeter/ })
+        .first()
+        .click();
+      await expect(page.getByText("Check lobby status").first()).toBeVisible();
+      await settle(page);
+      await save(
+        page,
+        "state-session-agent-run",
+        "Session transcript: an agent turn with its per-node run trace and session memory",
+        true,
+      );
+    });
     test("state: API key shown once", async ({ page }) => {
       await page.goto("/api-keys");
       // Answer the create call locally: nothing is stored, so reruns never add keys, and the
@@ -631,6 +1460,56 @@ for (const theme of themes) {
       );
     });
 
+    test("state: session with MCP tool calls", async ({ page }) => {
+      await page.goto(`/sessions/${demo.mcpSession}`);
+      await expect(page.getByText("composio__echo").first()).toBeVisible();
+      await expect(
+        page.locator('[data-slot="badge"]').filter({ hasText: "MCP" }).first(),
+      ).toBeVisible();
+      await settle(page);
+      await page.getByText("composio__echo").first().scrollIntoViewIfNeeded();
+      await save(
+        page,
+        "state-session-mcp-tools",
+        "Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration",
+        false,
+        true,
+      );
+    });
+
+    test("state: MCP server dialog", async ({ page }) => {
+      await page.goto("/mcp");
+      await settle(page);
+      await page.getByRole("button", { name: "New MCP server" }).click();
+      await page.getByRole("textbox", { name: "Name" }).fill("GitHub");
+      await page.getByRole("textbox", { name: "Slug" }).fill("github");
+      await page
+        .getByRole("textbox", { name: "Server URL" })
+        .fill("https://mcp.example.com/github");
+      await page.getByRole("textbox", { name: "Headers" }).fill("x-api-key: demo-not-a-real-key");
+      await settleDialog(page);
+      await save(
+        page,
+        "state-mcp-server-dialog",
+        "MCP Servers: create dialog (headers are write-only and encrypted at rest)",
+        false,
+      );
+    });
+
+    test("state: MCP tools browser", async ({ page }) => {
+      await page.goto("/mcp");
+      await settle(page);
+      await page.getByRole("button", { name: "Browse tools for Composio" }).click();
+      await page.getByRole("button", { name: "Schema preview" }).first().click();
+      await settleDialog(page);
+      await save(
+        page,
+        "state-mcp-tools-browser",
+        "MCP Servers: tools browser with allow switches and a JSON Schema preview",
+        false,
+      );
+    });
+
     test("state: responses api session", async ({ page }) => {
       await page.goto(`/sessions/${demo.responsesSession}`);
       await expect(page.getByText("responses → chat")).toBeVisible();
@@ -642,7 +1521,7 @@ for (const theme of themes) {
       await save(
         page,
         "state-session-responses",
-        "Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns",
+        "Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns",
         false,
       );
     });

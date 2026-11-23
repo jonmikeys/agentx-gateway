@@ -76,12 +76,45 @@ function chunk(content: string, finishReason: string | null = null): string {
 
 type Delta = Record<string, unknown>;
 
+function toolCallDelta(index: number, id: string, name: string, args: string): Delta {
+  return {
+    tool_calls: [{ index, id, type: "function", function: { name, arguments: args } }],
+  };
+}
+
+function messageList(body: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  return Array.isArray(body?.messages) ? (body.messages as Record<string, unknown>[]) : [];
+}
+
+function lastToolContent(messages: Record<string, unknown>[]): string {
+  const tool = [...messages].reverse().find((message) => message.role === "tool");
+  return typeof tool?.content === "string" ? tool.content : "";
+}
+
+function toolRound(messages: Record<string, unknown>[]): number {
+  return messages.filter((message) => message.role === "tool").length;
+}
+
+/** Finds the exposed MCP tool name for a suffix (`echo` -> `composio__echo` or `mock__echo`). */
+function mcpToolName(body: Record<string, unknown> | undefined, suffix: string): string {
+  const tools = Array.isArray(body?.tools) ? (body.tools as Record<string, unknown>[]) : [];
+  for (const tool of tools) {
+    const fn = tool.function as Record<string, unknown> | undefined;
+    const name = typeof fn?.name === "string" ? fn.name : undefined;
+    if (name?.endsWith(`__${suffix}`)) return name;
+  }
+  return `mock__${suffix}`;
+}
+
 /** Delta sequence for a model behaviour; each entry becomes one SSE chunk. */
 function scriptedDeltas(
   model: string,
-  lastRole: string,
-  lastUserText: string,
+  body: Record<string, unknown> | undefined,
 ): Delta[] | undefined {
+  const messages = messageList(body);
+  const { role: lastRole, user: lastUserText } = lastMessage(body);
+  const toolContent = lastToolContent(messages);
+  const round = toolRound(messages);
   switch (model) {
     case "reasoning":
       return [
@@ -119,6 +152,39 @@ function scriptedDeltas(
       ];
     case "echo":
       return [{ content: "Echo: " }, { content: lastUserText }];
+    case "mcp-echo":
+      if (lastRole === "tool") return [{ content: `Answer: ${toolContent}` }];
+      return [
+        { content: "Checking. " },
+        toolCallDelta(0, "call_mcp_echo", mcpToolName(body, "echo"), '{"text":"hello"}'),
+      ];
+    case "mcp-add":
+      if (lastRole === "tool") return [{ content: `Sum: ${toolContent}` }];
+      return [toolCallDelta(0, "call_mcp_add", mcpToolName(body, "add"), '{"a":2,"b":3}')];
+    case "mcp-multi":
+      if (round === 0) {
+        return [toolCallDelta(0, "call_multi_1", mcpToolName(body, "echo"), '{"text":"one"}')];
+      }
+      if (round === 1) {
+        return [toolCallDelta(0, "call_multi_2", mcpToolName(body, "add"), '{"a":4,"b":5}')];
+      }
+      return [{ content: `Multi done: ${toolContent}` }];
+    case "mcp-mixed":
+      if (lastRole === "tool" && round > 0) return [{ content: "Mixed done." }];
+      return [
+        { content: "Mixed. " },
+        toolCallDelta(0, "call_client_mixed", "show_image", '{"media_id":"sunset"}'),
+        toolCallDelta(1, "call_mcp_mixed", mcpToolName(body, "echo"), '{"text":"mixed"}'),
+      ];
+    case "mcp-limit":
+      if (body?.tool_choice === "none") return [{ content: "Limit reached." }];
+      return [toolCallDelta(0, "call_limit", mcpToolName(body, "echo"), '{"text":"loop"}')];
+    case "mcp-timeout":
+      if (lastRole === "tool") return [{ content: `Timeout feed: ${toolContent}` }];
+      return [toolCallDelta(0, "call_slow", mcpToolName(body, "slow"), '{"text":"slow"}')];
+    case "mcp-fail":
+      if (lastRole === "tool") return [{ content: `Failure feed: ${toolContent}` }];
+      return [toolCallDelta(0, "call_fail", mcpToolName(body, "fail"), '{"text":"fail"}')];
     default:
       return undefined;
   }
@@ -192,12 +258,22 @@ export async function startMockUpstream(options: MockUpstreamOptions = {}): Prom
     }
 
     const usage = { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 };
-    const { role: lastRole, user: lastUserText } = lastMessage(body);
-    const scripted = scriptedDeltas(model, lastRole, lastUserText);
+    const scripted = scriptedDeltas(model, body);
     if (scripted) {
-      const calls = scripted.flatMap((delta) =>
-        Array.isArray(delta.tool_calls) ? (delta.tool_calls as Record<string, unknown>[]) : [],
-      );
+      const calls: { id: string; name: string; args: string }[] = [];
+      for (const delta of scripted) {
+        if (!Array.isArray(delta.tool_calls)) continue;
+        for (const raw of delta.tool_calls as Record<string, unknown>[]) {
+          const index = typeof raw.index === "number" ? raw.index : calls.length;
+          const fn = (raw.function ?? {}) as Record<string, unknown>;
+          const existing = calls[index];
+          calls[index] = {
+            id: typeof raw.id === "string" ? raw.id : (existing?.id ?? `call_${index}`),
+            name: typeof fn.name === "string" ? fn.name : (existing?.name ?? ""),
+            args: (existing?.args ?? "") + (typeof fn.arguments === "string" ? fn.arguments : ""),
+          };
+        }
+      }
       if (!stream) {
         const message: Record<string, unknown> = {
           role: "assistant",
@@ -206,16 +282,11 @@ export async function startMockUpstream(options: MockUpstreamOptions = {}): Prom
         const reasoning = scripted.map((delta) => String(delta.reasoning_content ?? "")).join("");
         if (reasoning) message.reasoning_content = reasoning;
         if (calls.length > 0) {
-          message.tool_calls = [
-            {
-              id: "call_mock_1",
-              type: "function",
-              function: {
-                name: "show_image",
-                arguments: calls.map((call) => (call.function as Delta).arguments ?? "").join(""),
-              },
-            },
-          ];
+          message.tool_calls = calls.map((call) => ({
+            id: call.id,
+            type: "function",
+            function: { name: call.name, arguments: call.args },
+          }));
         }
         sendJson(response, 200, {
           id: "chatcmpl-mock",

@@ -18,11 +18,29 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-light.png](state-provider-dialog-light.png) | Providers: create dialog (the key field is write-only) (light theme) |
 | ![state-provider-test-result-light.png](state-provider-test-result-light.png) | Providers: test connection result with latency and model count (light theme) |
 | ![state-route-editor-light.png](state-route-editor-light.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (light theme) |
+| ![state-api-reference-light.png](state-api-reference-light.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (light theme) |
+| ![state-chatflow-editor-light.png](state-chatflow-editor-light.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (light theme) |
+| ![state-chatflow-properties-light.png](state-chatflow-properties-light.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (light theme) |
+| ![state-chatflow-publish-light.png](state-chatflow-publish-light.png) | Chatflow editor: publish dialog with validation results and a version note (light theme) |
+| ![state-chatflow-versions-light.png](state-chatflow-versions-light.png) | Chatflow editor: version history with a published version preview and restore (light theme) |
+| ![state-chatflow-test-trace-light.png](state-chatflow-test-trace-light.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (light theme) |
+| ![state-chatflow-client-action-light.png](state-chatflow-client-action-light.png) | Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template) (light theme) |
+| ![state-chatflow-notes-group-light.png](state-chatflow-notes-group-light.png) | Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed (light theme) |
+| ![state-chatflow-comment-light.png](state-chatflow-comment-light.png) | Chatflow editor: the node comment popover with the last-edited time (light theme) |
+| ![state-chatflow-subflow-light.png](state-chatflow-subflow-light.png) | Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output (light theme) |
+| ![state-chatflow-call-subflow-light.png](state-chatflow-call-subflow-light.png) | Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published (light theme) |
+| ![state-chatflow-version-compare-light.png](state-chatflow-version-compare-light.png) | Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft (light theme) |
+| ![state-chatflow-import-light.png](state-chatflow-import-light.png) | Chatflows: the JSON import dialog listing the webhook headers that must be re-linked (light theme) |
+| ![state-chatflow-paused-trace-light.png](state-chatflow-paused-trace-light.png) | Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result (light theme) |
+| ![state-session-agent-run-light.png](state-session-agent-run-light.png) | Session transcript: an agent turn with its per-node run trace and session memory (light theme) |
 | ![state-api-key-created-light.png](state-api-key-created-light.png) | API Keys: the full key is shown exactly once, with a copy button (light theme) |
 | ![state-session-detail-light.png](state-session-detail-light.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (light theme) |
 | ![state-session-detail-full-light.png](state-session-detail-full-light.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (light theme) |
 | ![state-session-tool-card-light.png](state-session-tool-card-light.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (light theme) |
-| ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (light theme) |
+| ![state-session-mcp-tools-light.png](state-session-mcp-tools-light.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (light theme) |
+| ![state-mcp-server-dialog-light.png](state-mcp-server-dialog-light.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (light theme) |
+| ![state-mcp-tools-browser-light.png](state-mcp-tools-browser-light.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (light theme) |
+| ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (light theme) |
 | ![state-session-failover-light.png](state-session-failover-light.png) | Session transcript: the failover popover lists every provider attempt and its outcome (light theme) |
 | ![state-session-ended-light.png](state-session-ended-light.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (light theme) |
 | ![state-sessions-search-light.png](state-sessions-search-light.png) | Sessions: full-text search for "sunset" (light theme) |
@@ -46,11 +64,29 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-dark.png](state-provider-dialog-dark.png) | Providers: create dialog (the key field is write-only) (dark theme) |
 | ![state-provider-test-result-dark.png](state-provider-test-result-dark.png) | Providers: test connection result with latency and model count (dark theme) |
 | ![state-route-editor-dark.png](state-route-editor-dark.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (dark theme) |
+| ![state-api-reference-dark.png](state-api-reference-dark.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (dark theme) |
+| ![state-chatflow-editor-dark.png](state-chatflow-editor-dark.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (dark theme) |
+| ![state-chatflow-properties-dark.png](state-chatflow-properties-dark.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (dark theme) |
+| ![state-chatflow-publish-dark.png](state-chatflow-publish-dark.png) | Chatflow editor: publish dialog with validation results and a version note (dark theme) |
+| ![state-chatflow-versions-dark.png](state-chatflow-versions-dark.png) | Chatflow editor: version history with a published version preview and restore (dark theme) |
+| ![state-chatflow-test-trace-dark.png](state-chatflow-test-trace-dark.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (dark theme) |
+| ![state-chatflow-client-action-dark.png](state-chatflow-client-action-dark.png) | Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template) (dark theme) |
+| ![state-chatflow-notes-group-dark.png](state-chatflow-notes-group-dark.png) | Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed (dark theme) |
+| ![state-chatflow-comment-dark.png](state-chatflow-comment-dark.png) | Chatflow editor: the node comment popover with the last-edited time (dark theme) |
+| ![state-chatflow-subflow-dark.png](state-chatflow-subflow-dark.png) | Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output (dark theme) |
+| ![state-chatflow-call-subflow-dark.png](state-chatflow-call-subflow-dark.png) | Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published (dark theme) |
+| ![state-chatflow-version-compare-dark.png](state-chatflow-version-compare-dark.png) | Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft (dark theme) |
+| ![state-chatflow-import-dark.png](state-chatflow-import-dark.png) | Chatflows: the JSON import dialog listing the webhook headers that must be re-linked (dark theme) |
+| ![state-chatflow-paused-trace-dark.png](state-chatflow-paused-trace-dark.png) | Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result (dark theme) |
+| ![state-session-agent-run-dark.png](state-session-agent-run-dark.png) | Session transcript: an agent turn with its per-node run trace and session memory (dark theme) |
 | ![state-api-key-created-dark.png](state-api-key-created-dark.png) | API Keys: the full key is shown exactly once, with a copy button (dark theme) |
 | ![state-session-detail-dark.png](state-session-detail-dark.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (dark theme) |
 | ![state-session-detail-full-dark.png](state-session-detail-full-dark.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (dark theme) |
 | ![state-session-tool-card-dark.png](state-session-tool-card-dark.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (dark theme) |
-| ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (dark theme) |
+| ![state-session-mcp-tools-dark.png](state-session-mcp-tools-dark.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (dark theme) |
+| ![state-mcp-server-dialog-dark.png](state-mcp-server-dialog-dark.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (dark theme) |
+| ![state-mcp-tools-browser-dark.png](state-mcp-tools-browser-dark.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (dark theme) |
+| ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (dark theme) |
 | ![state-session-failover-dark.png](state-session-failover-dark.png) | Session transcript: the failover popover lists every provider attempt and its outcome (dark theme) |
 | ![state-session-ended-dark.png](state-session-ended-dark.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (dark theme) |
 | ![state-sessions-search-dark.png](state-sessions-search-dark.png) | Sessions: full-text search for "sunset" (dark theme) |

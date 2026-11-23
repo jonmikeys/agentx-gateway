@@ -18,8 +18,11 @@ own how to reach its provider:
 
 Set the flag per provider in the CRM (Providers > edit > Responses API). A route can mix both
 kinds of step, and failover works across them: the first step may be native OpenAI and the second a
-translated DeepSeek. When no agent is involved (always true until G7a) the mode depends only on
-the step's provider.
+translated DeepSeek. When no agent is involved the mode depends only on
+the step's provider. When the request runs an agent (`agent_id` or `agent:<id>`), the Responses
+wire format is only the client-facing shape: the agent's LLM nodes always call providers through
+`{base_url}/chat/completions`, and the gateway translates the agent's output to Responses events
+(see [agents.md](agents.md)).
 
 ```mermaid
 flowchart LR

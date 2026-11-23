@@ -1,9 +1,10 @@
-import { sql } from "drizzle-orm";
+﻿import { sql } from "drizzle-orm";
 import { closeDatabase, getDb } from "@/server/db/client";
 import { runMigrations } from "@/server/db/migrate";
 import { resetEnvCacheForTests } from "@/server/env";
 import { circuitBreaker } from "@/server/gateway/circuit-breaker";
 import { invalidateApiKeyCache } from "@/server/gateway/client-auth-cache";
+import { resetMcpCallTimeout, resetMcpClients } from "@/server/gateway/mcp-client";
 import { createApiKey } from "@/server/services/api-keys";
 import { createProvider } from "@/server/services/providers";
 import { createRoute } from "@/server/services/routes";
@@ -30,9 +31,11 @@ export async function prepareDatabase(databaseUrl: string): Promise<void> {
 /** Empties every gateway table and resets in-process state (breaker, key cache). */
 export async function resetGatewayState(): Promise<void> {
   await getDb().execute(
-    sql`truncate table settings, sessions, llm_requests, rate_counters, route_steps, model_routes, api_keys, providers, media_items, cameras cascade`,
+    sql`truncate table settings, run_logs, session_memory, flows, flow_versions, flow_webhook_secrets, sessions, llm_requests, rate_counters, mcp_pending_messages, route_mcp_tools, mcp_tools, mcp_servers, route_steps, model_routes, api_keys, providers, media_items, cameras cascade`,
   );
   circuitBreaker.reset();
+  resetMcpClients();
+  resetMcpCallTimeout();
   resetSessionSettingsCacheForTests();
   invalidateApiKeyCache();
 }
@@ -64,7 +67,12 @@ export interface SeedStep {
   timeoutMs?: number;
 }
 
-export async function seedRoute(slug: string, steps: SeedStep[], enabled = true) {
+export async function seedRoute(
+  slug: string,
+  steps: SeedStep[],
+  enabled = true,
+  mcpToolIds: string[] = [],
+) {
   return createRoute({
     slug,
     description: "",
@@ -74,6 +82,7 @@ export async function seedRoute(slug: string, steps: SeedStep[], enabled = true)
       upstream_model: step.model,
       timeout_ms: step.timeoutMs ?? 5000,
     })),
+    mcp_tool_ids: mcpToolIds,
   });
 }
 

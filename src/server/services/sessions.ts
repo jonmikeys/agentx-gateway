@@ -118,10 +118,18 @@ type NewItem = typeof transcriptItems.$inferInsert;
  * request row and the turn bookkeeping, in one transaction. Locks the session row so
  * concurrent requests number their items consistently.
  */
-export async function persistRequest(input: PersistTurnInput): Promise<void> {
+export interface PersistedRequest {
+  turnId: string;
+  requestId: string;
+}
+
+export async function persistRequest(
+  input: PersistTurnInput,
+): Promise<PersistedRequest | undefined> {
   const { redaction_enabled: redact } = await getSessionSettings();
   const clean = (text: string) => (redact ? redactText(text) : text);
   const cleanValue = (value: unknown) => (redact ? redactValue(value) : value);
+  let persisted: PersistedRequest | undefined;
 
   await getDb().transaction(async (tx) => {
     const [session] = await tx
@@ -209,7 +217,19 @@ export async function persistRequest(input: PersistTurnInput): Promise<void> {
         toolName:
           item.toolName ?? (item.toolCallId ? (toolNames.get(item.toolCallId) ?? null) : null),
         toolArgs: item.kind === "tool_call" ? cleanValue(item.toolArgs ?? null) : null,
-        toolSource: item.kind === "tool_call" ? "client" : null,
+        toolSource: item.kind === "tool_call" || item.kind === "tool_result" ? "client" : null,
+      });
+    }
+
+    for (const item of input.outcome.mcpItems ?? []) {
+      rows.push({
+        kind: item.kind,
+        content: clean(item.content ?? ""),
+        toolCallId: item.toolCallId,
+        toolName: item.toolName,
+        toolArgs: item.kind === "tool_call" ? cleanValue(item.toolArgs ?? null) : null,
+        toolSource: "mcp",
+        durationMs: item.durationMs,
       });
     }
 
@@ -255,5 +275,7 @@ export async function persistRequest(input: PersistTurnInput): Promise<void> {
         systemPromptHash: promptHash ?? session.systemPromptHash,
       })
       .where(eq(sessions.id, input.sessionId));
+    persisted = { turnId, requestId };
   });
+  return persisted;
 }

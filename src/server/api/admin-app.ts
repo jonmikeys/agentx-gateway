@@ -1,8 +1,10 @@
-import { Hono } from "hono";
+﻿import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createApiKeysApp } from "@/server/api/admin/api-keys";
 import { createCamerasApp } from "@/server/api/admin/cameras";
 import { createDashboardApp } from "@/server/api/admin/dashboard";
+import { createFlowsApp } from "@/server/api/admin/flows";
+import { createMcpServersApp, createMcpToolsApp } from "@/server/api/admin/mcp";
 import { createMediaApp } from "@/server/api/admin/media";
 import { createProvidersApp } from "@/server/api/admin/providers";
 import { createRoutesApp } from "@/server/api/admin/routes";
@@ -35,6 +37,9 @@ export function createAdminApp(): Hono<AdminEnv> {
   admin.route("/api/admin/dashboard", createDashboardApp());
   admin.route("/api/admin/media", createMediaApp());
   admin.route("/api/admin/cameras", createCamerasApp());
+  admin.route("/api/admin/mcp-servers", createMcpServersApp());
+  admin.route("/api/admin/mcp-tools", createMcpToolsApp());
+  admin.route("/api/admin/flows", createFlowsApp());
 
   admin.notFound((c) =>
     c.json({ error: { code: "not_found", message: "Unknown admin route" } }, 404),

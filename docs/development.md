@@ -23,7 +23,7 @@ need it.
 
 | Path | Purpose |
 |---|---|
-| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Providers, Model Routes, API Keys, Settings, Media, Cameras implemented; the rest are placeholders) |
+| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Chatflows editor, Providers, Model Routes, API Keys, Settings, Media, Cameras, MCP) |
 | `src/app/v1`, `src/app/agents`, `src/app/health` | Thin Next route files that mount the Hono client API |
 | `src/app/api/admin` | Mounts the admin Hono app (requires AdminAuth) |
 | `src/proxy.ts` | Guards every CRM page and `/api/admin/*` with HTTP Basic auth |
@@ -59,14 +59,32 @@ behind a reverse proxy the client IP comes from `X-Forwarded-For`, which Caddy s
 ## Adding things
 
 - **Env variable**: add it to `envSchema` in `src/server/env.ts`, to `.env.example` (empty value
-  plus a comment), and to the table in `docs/spec.md`.
+  plus a comment), to the table in `README.md` and to the table in `docs/spec.md`.
 - **Table**: edit `src/server/db/schema.ts`, run `pnpm db:generate`, commit `drizzle/`.
 - **Encrypted column**: store the value with `encryptSecret()`, display with `maskSecret()`, and
   register the column in `src/server/crypto/encrypted-columns.ts`.
 - **CRM page**: add it to `nav.ts` (groups/pages), then a `page.tsx` under `src/app/(crm)/`.
 - **shadcn component**: `pnpm dlx shadcn@latest add <name>`.
 - **Client API route**: define it with its full path in `src/server/api/app.ts`; errors use
-  `openAIError()`. Remember 404 on chat routes means `session_not_found`.
+  `openAIError()`. Remember 404 on chat routes means `session_not_found`. Also describe the route
+  in the OpenAPI document (see below).
+
+## OpenAPI document
+
+`GET /v1/openapi.json` serves an OpenAPI 3.1 description of the client API (`/v1/*`, `/agents`
+and `/health`). It is generated from the same Zod schemas the routes validate with and lives in
+`src/server/api/openapi.ts`. It is served without authentication, like `/health`, so tools can
+fetch it. `/docs` renders it as a Scalar API reference behind the admin Basic auth.
+
+Every new client route must be added to `src/server/api/openapi.ts`; `tests/unit/openapi.test.ts`
+validates the document and checks that it lists exactly the routes registered on the Hono app, so
+a route without an entry fails the test suite.
+
+The Scalar bundle is served from the gateway itself, not a CDN: `pnpm dev` and `pnpm build` run
+`scripts/vendor-scalar.mjs`, which copies `@scalar/api-reference`'s standalone bundle to
+`public/vendor/scalar/` (git-ignored). Scalar's hosted extras (fonts, telemetry, AI agent, MCP)
+are disabled in `src/app/docs/route.ts`, and `e2e/api-docs.spec.ts` fails if the page makes any
+request outside the gateway.
 
 ## Secrets and key rotation
 
@@ -82,15 +100,16 @@ pnpm secrets:rotate
 ```
 
 Rotation re-encrypts every column in the registry inside one transaction. Take a `pg_dump`
-backup first, and keep the new key somewhere safe: without it secrets are unrecoverable.
+backup first, and keep the new key somewhere safe: without it secrets are unrecoverable. The
+full production procedure (including Docker Compose) is in [operations.md](operations.md#rotating-the-encryption-key).
 
 ## Testing
 
 | Command | What it covers |
 |---|---|
-| `pnpm test:unit` | Secrets (round trip, tamper detection, masking), env validation, AdminAuth parsing and rate limit, `openAIError`, CORS and 404 shape, nav data integrity, CIDR matcher, API key format, route selection, failover classifier and error mapping, circuit breaker, SSE parser |
-| `pnpm test:integration` | Media and camera APIs (uploads, Range, external URL checks, MJPEG test and preview, credentials at rest and rotation: `media.test.ts`, `cameras.test.ts`). Migrations apply to a real Postgres (Testcontainers), `/health`, secret rotation (including the provider columns), the admin API (secrets never returned), and the client API against `tests/support/mock-upstream.ts`: passthrough, failover, circuit breaker, error mapping, auth, allowlist and rate limits, request log, sessions (header contract, transcript capture, retention, exports, search, dashboard stats). Needs Docker |
-| `pnpm test:e2e` | Playwright (including `e2e/media.spec.ts`: upload, edit, camera test and preview against `tests/support/mock-mjpeg.ts`) against a running app (also the sessions viewer: search, thinking, tool card, end session and the layout guards of `e2e/layout.spec.ts`, see [`ui-qa.md`](ui-qa.md)): 401 without credentials, sidebar groups, navigation, Ctrl+K palette, `/api/admin/me`, and the G2 flow (create provider, test it, create route and API key, call the gateway through a mock upstream) |
+| `pnpm test:unit` | Secrets (round trip, tamper detection, masking), env validation, AdminAuth parsing and rate limit, `openAIError`, CORS and 404 shape, nav data integrity, CIDR matcher, API key format, route selection, failover classifier and error mapping, circuit breaker, SSE parser, and the agent graph: templates, validator, node executors and the LangGraph compiler/runtime |
+| `pnpm test:integration` | Media and camera APIs (uploads, Range, external URL checks, MJPEG test and preview, credentials at rest and rotation: `media.test.ts`, `cameras.test.ts`). Migrations apply to a real Postgres (Testcontainers), `/health`, secret rotation (including the provider columns), the admin API (secrets never returned), and the client API against `tests/support/mock-upstream.ts`: passthrough, failover, circuit breaker, error mapping, auth, allowlist and rate limits, request log, sessions (header contract, transcript capture, retention, exports, search, dashboard stats), and agents end to end (`agents.test.ts`: chat and Responses runs, webhook success/error/retry, memory across turns, MCP Tool and Router branches, invalid_agent, agent changes, run logs and purge) against the mock upstream, mock MCP and mock webhook. Needs Docker |
+| `pnpm test:e2e` | Playwright (including `e2e/media.spec.ts`: upload, edit, camera test and preview against `tests/support/mock-mjpeg.ts`, `e2e/agents.spec.ts`: build, publish and test a chatflow, and the sessions viewer) against a running app (also the sessions viewer: search, thinking, tool card, end session and the layout guards of `e2e/layout.spec.ts`, see [`ui-qa.md`](ui-qa.md)): 401 without credentials, sidebar groups, navigation, Ctrl+K palette, `/api/admin/me`, and the G2 flow (create provider, test it, create route and API key, call the gateway through a mock upstream) |
 | `pnpm screenshots` | Captures every CRM page plus key states (light and dark, 1440x900) into `docs/screenshots`. Needs a running app and a fresh database (it also reads `DATABASE_URL`, default `postgres://agentx:agentx@localhost:5432/agentx`, to backdate demo history); see `playwright.screenshots.config.ts` |
 
 Run the e2e tests against a built app:

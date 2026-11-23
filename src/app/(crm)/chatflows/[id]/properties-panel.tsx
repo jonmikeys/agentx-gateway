@@ -1,0 +1,1502 @@
+﻿"use client";
+
+import { Plus, Trash2 } from "lucide-react";
+import { useId } from "react";
+import type { EditorNodeData } from "@/app/(crm)/chatflows/[id]/flow-editor-utils";
+import { TemplateField } from "@/app/(crm)/chatflows/[id]/template-field";
+import { TagsInput } from "@/components/crm/tags-input";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { CLIENT_ACTION_TOOLS } from "@/lib/agents/client-tools";
+import {
+  type CallSubflowNodeData,
+  type ClientActionNodeData,
+  type GroupNodeData,
+  type LlmNodeData,
+  type McpToolNodeData,
+  type MemoryNodeData,
+  NOTE_COLORS,
+  type NoteNodeData,
+  type ReplyNodeData,
+  type RouterNodeData,
+  type SetVariableNodeData,
+  type SubflowInputNodeData,
+  type SubflowOutputNodeData,
+  type WebhookNodeData,
+} from "@/lib/agents/graph";
+import type { VariableSuggestion } from "@/lib/agents/templates";
+import type { SubflowOption } from "@/lib/agents/types";
+
+export interface McpOption {
+  id: string;
+  name: string;
+  exposed_name: string;
+  server_id: string;
+  server_name: string;
+}
+
+/** Catalogue rows the Client Action pickers offer (already narrowed by the agent's restrictions). */
+export interface MediaOption {
+  id: string;
+  name: string;
+  kind: string;
+  tags: string[];
+}
+
+export interface CameraOption {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+interface PropertiesPanelProps {
+  data?: EditorNodeData;
+  nodeType?: string;
+  routes: string[];
+  mcpServers: { id: string; name: string; slug: string; enabled: boolean }[];
+  mcpTools: McpOption[];
+  media: MediaOption[];
+  cameras: CameraOption[];
+  allowedMediaTags: string[];
+  allowedCameraIds: string[];
+  subflows: SubflowOption[];
+  variables: VariableSuggestion[];
+  knownNodeIds: string[];
+  onChange: (data: EditorNodeData) => void;
+}
+
+function Field({ label, children, id }: { label: string; children: React.ReactNode; id?: string }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id} className="text-xs">
+        {label}
+      </Label>
+      {children}
+    </div>
+  );
+}
+
+function NumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  id,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  id?: string;
+}) {
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={min}
+      max={max}
+      value={Number.isFinite(value) ? value : 0}
+      onChange={(event) => onChange(Number(event.target.value))}
+    />
+  );
+}
+
+function RouteSelect({
+  value,
+  onChange,
+  routes,
+  allowInherit,
+  id,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  routes: string[];
+  allowInherit: boolean;
+  id?: string;
+}) {
+  const missing = value !== "inherit" && !routes.includes(value);
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger id={id} className="w-full">
+        <SelectValue placeholder="Choose a route" />
+      </SelectTrigger>
+      <SelectContent>
+        {allowInherit && <SelectItem value="inherit">Inherit request / agent default</SelectItem>}
+        {missing && value && <SelectItem value={value}>{value} (missing)</SelectItem>}
+        {routes.map((route) => (
+          <SelectItem key={route} value={route}>
+            {route}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function parseArgsTemplate(template: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(template.trim() || "{}") as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // The free-form editor allows invalid JSON while typing; the pickers reset it.
+  }
+  return {};
+}
+
+function argsTemplateWith(template: string, patch: Record<string, unknown>): string {
+  return JSON.stringify({ ...parseArgsTemplate(template), ...patch }, null, 2);
+}
+
+/** Right-hand inspector. Forms mirror the node Zod schemas and the registry pickers. */
+export function PropertiesPanel({
+  data,
+  nodeType,
+  routes,
+  mcpServers,
+  mcpTools,
+  media,
+  cameras,
+  allowedMediaTags,
+  allowedCameraIds,
+  subflows,
+  variables,
+  knownNodeIds,
+  onChange,
+}: PropertiesPanelProps) {
+  const prefix = useId();
+  const fieldId = (name: string) => `${prefix}-${name}`;
+
+  if (!data || !nodeType) {
+    return (
+      <div className="grid h-full place-items-center p-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          Select a node to edit its settings, or add one from the palette.
+        </p>
+      </div>
+    );
+  }
+
+  const update = (patch: Record<string, unknown>) =>
+    onChange({ ...data, ...patch } as EditorNodeData);
+
+  const common = (
+    <>
+      <Field label="Title" id={fieldId("title")}>
+        <Input
+          id={fieldId("title")}
+          value={data.title}
+          onChange={(event) => update({ title: event.target.value })}
+        />
+      </Field>
+      <Field label="Comment" id={fieldId("comment")}>
+        <Textarea
+          id={fieldId("comment")}
+          rows={2}
+          placeholder="A note for editors (never executed)."
+          value={data.comment ?? ""}
+          onChange={(event) =>
+            update({
+              comment: event.target.value,
+              ...(event.target.value.trim() ? { commentUpdatedAt: new Date().toISOString() } : {}),
+            })
+          }
+        />
+      </Field>
+    </>
+  );
+
+  if (nodeType === "note") {
+    const note = data as NoteNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        <Field label="Title" id={fieldId("title")}>
+          <Input
+            id={fieldId("title")}
+            value={note.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+        </Field>
+        <Field label="Markdown" id={fieldId("noteMarkdown")}>
+          <Textarea
+            id={fieldId("noteMarkdown")}
+            rows={8}
+            className="font-mono text-xs"
+            placeholder="Write Markdown… raw HTML is shown as text."
+            value={note.markdown}
+            onChange={(event) => update({ markdown: event.target.value })}
+          />
+        </Field>
+        <Field label="Colour" id={fieldId("noteColor")}>
+          <Select value={note.color} onValueChange={(value) => update({ color: value })}>
+            <SelectTrigger id={fieldId("noteColor")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {NOTE_COLORS.map((colour) => (
+                <SelectItem key={colour} value={colour}>
+                  {colour}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <p className="text-xs text-muted-foreground">
+          Canvas only: notes are versioned and exported but never validated or executed.
+        </p>
+      </div>
+    );
+  }
+
+  if (nodeType === "group") {
+    const group = data as GroupNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        <Field label="Title" id={fieldId("title")}>
+          <Input
+            id={fieldId("title")}
+            value={group.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+        </Field>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={fieldId("collapsed")} className="text-xs">
+            Collapsed
+          </Label>
+          <Switch
+            id={fieldId("collapsed")}
+            checked={group.collapsed}
+            onCheckedChange={(checked) => update({ collapsed: checked })}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Purely visual: the compiler and validator ignore groups and run their children normally.
+        </p>
+      </div>
+    );
+  }
+
+  if (nodeType === "llm") {
+    const llm = data as LlmNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Model route" id={fieldId("model")}>
+          <RouteSelect
+            id={fieldId("model")}
+            value={llm.model}
+            routes={routes}
+            allowInherit
+            onChange={(value) => update({ model: value })}
+          />
+        </Field>
+        <Field label="System prompt">
+          <TemplateField
+            value={llm.systemPrompt}
+            onChange={(value) => update({ systemPrompt: value })}
+            variables={variables}
+            knownNodeIds={knownNodeIds}
+            placeholder="You are a helpful lobby greeter."
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="History" id={fieldId("history")}>
+            <Select value={llm.history} onValueChange={(value) => update({ history: value })}>
+              <SelectTrigger id={fieldId("history")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="full">Full</SelectItem>
+                <SelectItem value="last_n">Last N</SelectItem>
+                <SelectItem value="none">None</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {llm.history === "last_n" && (
+            <Field label="Messages" id={fieldId("historyLimit")}>
+              <NumberInput
+                id={fieldId("historyLimit")}
+                value={llm.historyLimit}
+                min={1}
+                max={100}
+                onChange={(value) => update({ historyLimit: value })}
+              />
+            </Field>
+          )}
+        </div>
+        <Field label="Output variable" id={fieldId("output")}>
+          <Input
+            id={fieldId("output")}
+            className="font-mono text-xs"
+            value={llm.outputVariable}
+            onChange={(event) => update({ outputVariable: event.target.value })}
+          />
+        </Field>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={fieldId("stream")} className="text-xs">
+            Stream when terminal
+          </Label>
+          <Switch
+            id={fieldId("stream")}
+            checked={llm.stream}
+            onCheckedChange={(checked) => update({ stream: checked })}
+          />
+        </div>
+        <Field label="MCP tools">
+          {mcpTools.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No allowed MCP tools. Allow tools on an MCP server first.
+            </p>
+          ) : (
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {mcpTools.map((tool) => (
+                <div key={tool.id} className="flex items-center gap-2 text-xs">
+                  <Checkbox
+                    aria-label={`Offer ${tool.exposed_name}`}
+                    checked={llm.mcpToolIds.includes(tool.id)}
+                    onCheckedChange={(checked) =>
+                      update({
+                        mcpToolIds: checked
+                          ? [...llm.mcpToolIds, tool.id]
+                          : llm.mcpToolIds.filter((id) => id !== tool.id),
+                      })
+                    }
+                  />
+                  <span className="font-mono">{tool.exposed_name}</span>
+                  <span className="text-muted-foreground">{tool.server_name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Field>
+        <Field label="Client tools (from the request)" id={fieldId("clientTools")}>
+          <Select
+            value={llm.clientTools.mode}
+            onValueChange={(value) =>
+              update({
+                clientTools: {
+                  ...llm.clientTools,
+                  mode: value as LlmNodeData["clientTools"]["mode"],
+                },
+              })
+            }
+          >
+            <SelectTrigger id={fieldId("clientTools")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Do not offer client tools</SelectItem>
+              <SelectItem value="all">Offer every tool the client sent</SelectItem>
+              <SelectItem value="subset">Offer a chosen subset</SelectItem>
+            </SelectContent>
+          </Select>
+          {llm.clientTools.mode === "subset" && (
+            <TagsInput
+              aria-label="Client tool names"
+              value={llm.clientTools.names}
+              onChange={(names) => update({ clientTools: { ...llm.clientTools, names } })}
+              suggestions={CLIENT_ACTION_TOOLS.map((tool) => tool.name)}
+            />
+          )}
+          <p className="text-xs text-muted-foreground">
+            Unity sends its tools with each request; when the model calls one the run pauses for the
+            result.
+          </p>
+        </Field>
+      </div>
+    );
+  }
+
+  if (nodeType === "router") {
+    const router = data as RouterNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Mode" id={fieldId("mode")}>
+          <Select value={router.mode} onValueChange={(value) => update({ mode: value })}>
+            <SelectTrigger id={fieldId("mode")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="rules">Rules</SelectItem>
+              <SelectItem value="intent">Intent (LLM picks a label)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Model route (intent)" id={fieldId("routerModel")}>
+          <RouteSelect
+            id={fieldId("routerModel")}
+            value={router.model}
+            routes={routes}
+            allowInherit
+            onChange={(value) => update({ model: value })}
+          />
+        </Field>
+        {router.mode === "rules" ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium">Rules (first match wins)</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-label="Add rule"
+                onClick={() =>
+                  update({
+                    rules: [
+                      ...router.rules,
+                      {
+                        id: `rule_${Date.now().toString(36)}`,
+                        label: `Rule ${router.rules.length + 1}`,
+                        operator: "contains",
+                        subject: "{{input.text}}",
+                        value: "",
+                      },
+                    ],
+                  })
+                }
+              >
+                <Plus />
+                Add
+              </Button>
+            </div>
+            {router.rules.map((rule, index) => (
+              <div key={rule.id} className="space-y-2 rounded-md border p-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    aria-label={`Rule ${index + 1} label`}
+                    value={rule.label}
+                    onChange={(event) =>
+                      update({
+                        rules: router.rules.map((entry, position) =>
+                          position === index ? { ...entry, label: event.target.value } : entry,
+                        ),
+                      })
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Remove rule ${index + 1}`}
+                    onClick={() =>
+                      update({ rules: router.rules.filter((_, position) => position !== index) })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+                <Select
+                  value={rule.operator}
+                  onValueChange={(value) =>
+                    update({
+                      rules: router.rules.map((entry, position) =>
+                        position === index ? { ...entry, operator: value } : entry,
+                      ),
+                    })
+                  }
+                >
+                  <SelectTrigger aria-label={`Rule ${index + 1} operator`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="equals">equals</SelectItem>
+                    <SelectItem value="contains">contains</SelectItem>
+                    <SelectItem value="regex">regex</SelectItem>
+                  </SelectContent>
+                </Select>
+                <TemplateField
+                  label="Subject"
+                  value={rule.subject}
+                  onChange={(value) =>
+                    update({
+                      rules: router.rules.map((entry, position) =>
+                        position === index ? { ...entry, subject: value } : entry,
+                      ),
+                    })
+                  }
+                  variables={variables}
+                  knownNodeIds={knownNodeIds}
+                  multiline={false}
+                />
+                <TemplateField
+                  label="Value"
+                  value={rule.value}
+                  onChange={(value) =>
+                    update({
+                      rules: router.rules.map((entry, position) =>
+                        position === index ? { ...entry, value } : entry,
+                      ),
+                    })
+                  }
+                  variables={variables}
+                  knownNodeIds={knownNodeIds}
+                  multiline={false}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium">Intent labels</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-label="Add intent label"
+                onClick={() => update({ intentLabels: [...router.intentLabels, "label"] })}
+              >
+                <Plus />
+                Add
+              </Button>
+            </div>
+            {router.intentLabels.map((label, index) => (
+              <div key={label} className="flex items-center gap-2">
+                <Input
+                  aria-label={`Intent label ${index + 1}`}
+                  value={label}
+                  onChange={(event) =>
+                    update({
+                      intentLabels: router.intentLabels.map((entry, position) =>
+                        position === index ? event.target.value : entry,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove intent label ${index + 1}`}
+                  onClick={() =>
+                    update({
+                      intentLabels: router.intentLabels.filter((_, position) => position !== index),
+                    })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+            <TemplateField
+              label="Instruction"
+              value={router.intentInstruction}
+              onChange={(value) => update({ intentInstruction: value })}
+              variables={variables}
+              knownNodeIds={knownNodeIds}
+            />
+          </div>
+        )}
+        <Field label="Default label" id={fieldId("defaultLabel")}>
+          <Input
+            id={fieldId("defaultLabel")}
+            value={router.defaultLabel}
+            onChange={(event) => update({ defaultLabel: event.target.value })}
+          />
+        </Field>
+      </div>
+    );
+  }
+
+  if (nodeType === "set_variable") {
+    const setter = data as SetVariableNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Assignments</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Add assignment"
+            onClick={() =>
+              update({ assignments: [...setter.assignments, { key: "var", value: "" }] })
+            }
+          >
+            <Plus />
+            Add
+          </Button>
+        </div>
+        {setter.assignments.map((assignment, index) => (
+          <div
+            key={`${assignment.key}-${assignment.value}`}
+            className="space-y-2 rounded-md border p-2"
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={`Assignment ${index + 1} name`}
+                className="font-mono text-xs"
+                value={assignment.key}
+                onChange={(event) =>
+                  update({
+                    assignments: setter.assignments.map((entry, position) =>
+                      position === index ? { ...entry, key: event.target.value } : entry,
+                    ),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove assignment ${index + 1}`}
+                onClick={() =>
+                  update({
+                    assignments: setter.assignments.filter((_, position) => position !== index),
+                  })
+                }
+              >
+                <Trash2 />
+              </Button>
+            </div>
+            <TemplateField
+              value={assignment.value}
+              onChange={(value) =>
+                update({
+                  assignments: setter.assignments.map((entry, position) =>
+                    position === index ? { ...entry, value } : entry,
+                  ),
+                })
+              }
+              variables={variables}
+              knownNodeIds={knownNodeIds}
+              rows={2}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (nodeType === "webhook") {
+    const webhook = data as WebhookNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Method" id={fieldId("method")}>
+          <Select value={webhook.method} onValueChange={(value) => update({ method: value })}>
+            <SelectTrigger id={fieldId("method")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {["GET", "POST", "PUT", "PATCH", "DELETE"].map((method) => (
+                <SelectItem key={method} value={method}>
+                  {method}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <TemplateField
+          label="URL"
+          value={webhook.url}
+          onChange={(value) => update({ url: value })}
+          variables={variables}
+          knownNodeIds={knownNodeIds}
+          multiline={false}
+        />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">Headers (encrypted)</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              aria-label="Add header"
+              onClick={() => update({ headers: [...webhook.headers, { name: "", value: "" }] })}
+            >
+              <Plus />
+              Add
+            </Button>
+          </div>
+          {webhook.headers.map((header, index) => (
+            <div
+              key={`${header.name}-${header.value ?? header.masked ?? ""}`}
+              className="space-y-1 rounded-md border p-2"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`Header ${index + 1} name`}
+                  placeholder="X-Api-Key"
+                  value={header.name}
+                  onChange={(event) =>
+                    update({
+                      headers: webhook.headers.map((entry, position) =>
+                        position === index ? { ...entry, name: event.target.value } : entry,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove header ${index + 1}`}
+                  onClick={() =>
+                    update({ headers: webhook.headers.filter((_, position) => position !== index) })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <Input
+                aria-label={`Header ${index + 1} value`}
+                placeholder={header.masked ? `Stored: ${header.masked}` : "Value"}
+                value={header.value ?? ""}
+                onChange={(event) =>
+                  update({
+                    headers: webhook.headers.map((entry, position) =>
+                      position === index ? { ...entry, value: event.target.value } : entry,
+                    ),
+                  })
+                }
+              />
+            </div>
+          ))}
+        </div>
+        <TemplateField
+          label="Body template"
+          value={webhook.bodyTemplate}
+          onChange={(value) => update({ bodyTemplate: value })}
+          variables={variables}
+          knownNodeIds={knownNodeIds}
+          rows={5}
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Timeout (ms)" id={fieldId("timeout")}>
+            <NumberInput
+              id={fieldId("timeout")}
+              value={webhook.timeoutMs}
+              min={500}
+              max={60000}
+              onChange={(value) => update({ timeoutMs: value })}
+            />
+          </Field>
+          <Field label="Retries" id={fieldId("retries")}>
+            <NumberInput
+              id={fieldId("retries")}
+              value={webhook.retries}
+              min={0}
+              max={3}
+              onChange={(value) => update({ retries: value })}
+            />
+          </Field>
+        </div>
+        <Field label="Response cap (bytes)" id={fieldId("cap")}>
+          <NumberInput
+            id={fieldId("cap")}
+            value={webhook.maxResponseBytes}
+            min={1024}
+            max={5000000}
+            onChange={(value) => update({ maxResponseBytes: value })}
+          />
+        </Field>
+        <Field label="Output variable" id={fieldId("webhookOutput")}>
+          <Input
+            id={fieldId("webhookOutput")}
+            className="font-mono text-xs"
+            value={webhook.outputVariable}
+            onChange={(event) => update({ outputVariable: event.target.value })}
+          />
+        </Field>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">JSON path mappings</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              aria-label="Add mapping"
+              onClick={() =>
+                update({ mappings: [...webhook.mappings, { variable: "value", path: "" }] })
+              }
+            >
+              <Plus />
+              Add
+            </Button>
+          </div>
+          {webhook.mappings.map((mapping, index) => (
+            <div key={`${mapping.variable}-${mapping.path}`} className="flex items-center gap-2">
+              <Input
+                aria-label={`Mapping ${index + 1} variable`}
+                className="font-mono text-xs"
+                value={mapping.variable}
+                onChange={(event) =>
+                  update({
+                    mappings: webhook.mappings.map((entry, position) =>
+                      position === index ? { ...entry, variable: event.target.value } : entry,
+                    ),
+                  })
+                }
+              />
+              <Input
+                aria-label={`Mapping ${index + 1} JSON path`}
+                className="font-mono text-xs"
+                placeholder="data.value"
+                value={mapping.path}
+                onChange={(event) =>
+                  update({
+                    mappings: webhook.mappings.map((entry, position) =>
+                      position === index ? { ...entry, path: event.target.value } : entry,
+                    ),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove mapping ${index + 1}`}
+                onClick={() =>
+                  update({ mappings: webhook.mappings.filter((_, position) => position !== index) })
+                }
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (nodeType === "memory") {
+    const memory = data as MemoryNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Operation" id={fieldId("operation")}>
+          <Select value={memory.operation} onValueChange={(value) => update({ operation: value })}>
+            <SelectTrigger id={fieldId("operation")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="get">get</SelectItem>
+              <SelectItem value="set">set</SelectItem>
+              <SelectItem value="append">append</SelectItem>
+              <SelectItem value="delete">delete</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <TemplateField
+          label="Key"
+          value={memory.key}
+          onChange={(value) => update({ key: value })}
+          variables={variables}
+          knownNodeIds={knownNodeIds}
+          multiline={false}
+        />
+        {memory.operation !== "get" && memory.operation !== "delete" && (
+          <TemplateField
+            label="Value"
+            value={memory.value}
+            onChange={(value) => update({ value })}
+            variables={variables}
+            knownNodeIds={knownNodeIds}
+          />
+        )}
+        <Field label="Output variable" id={fieldId("memoryOutput")}>
+          <Input
+            id={fieldId("memoryOutput")}
+            className="font-mono text-xs"
+            value={memory.outputVariable}
+            onChange={(event) => update({ outputVariable: event.target.value })}
+          />
+        </Field>
+      </div>
+    );
+  }
+
+  if (nodeType === "mcp_tool") {
+    const mcp = data as McpToolNodeData;
+    const toolsForServer = mcpTools.filter((tool) => tool.server_id === mcp.serverId);
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="MCP server" id={fieldId("mcpServer")}>
+          <Select
+            value={mcp.serverId}
+            onValueChange={(value) => update({ serverId: value, toolName: "" })}
+          >
+            <SelectTrigger id={fieldId("mcpServer")} className="w-full">
+              <SelectValue placeholder="Choose a server" />
+            </SelectTrigger>
+            <SelectContent>
+              {mcpServers.map((server) => (
+                <SelectItem key={server.id} value={server.id}>
+                  {server.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Allowed tool" id={fieldId("mcpTool")}>
+          <Select
+            value={mcp.toolName}
+            onValueChange={(value) => update({ toolName: value })}
+            disabled={!mcp.serverId}
+          >
+            <SelectTrigger id={fieldId("mcpTool")} className="w-full">
+              <SelectValue placeholder="Choose a tool" />
+            </SelectTrigger>
+            <SelectContent>
+              {toolsForServer.map((tool) => (
+                <SelectItem key={tool.id} value={tool.exposed_name.split("__").slice(1).join("__")}>
+                  {tool.exposed_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">Arguments</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              aria-label="Add argument"
+              onClick={() => update({ args: [...mcp.args, { name: "", value: "" }] })}
+            >
+              <Plus />
+              Add
+            </Button>
+          </div>
+          {mcp.args.map((argument, index) => (
+            <div
+              key={`${argument.name}-${argument.value}`}
+              className="space-y-1 rounded-md border p-2"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`Argument ${index + 1} name`}
+                  placeholder="text"
+                  value={argument.name}
+                  onChange={(event) =>
+                    update({
+                      args: mcp.args.map((entry, position) =>
+                        position === index ? { ...entry, name: event.target.value } : entry,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove argument ${index + 1}`}
+                  onClick={() =>
+                    update({ args: mcp.args.filter((_, position) => position !== index) })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <TemplateField
+                value={argument.value}
+                onChange={(value) =>
+                  update({
+                    args: mcp.args.map((entry, position) =>
+                      position === index ? { ...entry, value } : entry,
+                    ),
+                  })
+                }
+                variables={variables}
+                knownNodeIds={knownNodeIds}
+                rows={2}
+              />
+            </div>
+          ))}
+        </div>
+        <Field label="Output variable" id={fieldId("mcpOutput")}>
+          <Input
+            id={fieldId("mcpOutput")}
+            className="font-mono text-xs"
+            value={mcp.outputVariable}
+            onChange={(event) => update({ outputVariable: event.target.value })}
+          />
+        </Field>
+      </div>
+    );
+  }
+
+  if (nodeType === "client_action") {
+    const action = data as ClientActionNodeData;
+    const fixed = CLIENT_ACTION_TOOLS.find((tool) => tool.name === action.toolName);
+    const args = parseArgsTemplate(action.argsTemplate);
+    const mediaOptions =
+      allowedMediaTags.length === 0
+        ? media
+        : media.filter((item) => item.tags.some((tag) => allowedMediaTags.includes(tag)));
+    const cameraOptions =
+      allowedCameraIds.length === 0
+        ? cameras.filter((camera) => camera.enabled)
+        : cameras.filter((camera) => allowedCameraIds.includes(camera.id));
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Client tool" id={fieldId("clientTool")}>
+          <Select
+            value={fixed ? action.toolName : "custom"}
+            onValueChange={(value) =>
+              update({
+                toolName: value === "custom" ? "custom_tool" : value,
+                argsTemplate: argsTemplateWith(action.argsTemplate, {}),
+              })
+            }
+          >
+            <SelectTrigger id={fieldId("clientTool")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CLIENT_ACTION_TOOLS.map((tool) => (
+                <SelectItem key={tool.name} value={tool.name}>
+                  {tool.name} — {tool.label}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom">Custom tool (free-form)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        {!fixed && (
+          <Field label="Tool name" id={fieldId("customTool")}>
+            <Input
+              id={fieldId("customTool")}
+              className="font-mono text-xs"
+              value={action.toolName}
+              onChange={(event) => update({ toolName: event.target.value })}
+            />
+          </Field>
+        )}
+        {fixed?.argument === "media_id" && (
+          <Field label="Media item" id={fieldId("clientMedia")}>
+            {mediaOptions.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No media matches the agent's allowed tags.
+              </p>
+            ) : (
+              <Select
+                value={typeof args.media_id === "string" ? args.media_id : ""}
+                onValueChange={(value) =>
+                  update({
+                    argsTemplate: argsTemplateWith(action.argsTemplate, { media_id: value }),
+                  })
+                }
+              >
+                <SelectTrigger id={fieldId("clientMedia")} className="w-full">
+                  <SelectValue placeholder="Choose media" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mediaOptions.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name} ({item.kind})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
+        )}
+        {fixed?.argument === "camera_id" && (
+          <Field label="Camera" id={fieldId("clientCamera")}>
+            {cameraOptions.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No cameras are allowed for this agent.
+              </p>
+            ) : (
+              <Select
+                value={typeof args.camera_id === "string" ? args.camera_id : ""}
+                onValueChange={(value) =>
+                  update({
+                    argsTemplate: argsTemplateWith(action.argsTemplate, { camera_id: value }),
+                  })
+                }
+              >
+                <SelectTrigger id={fieldId("clientCamera")} className="w-full">
+                  <SelectValue placeholder="Choose camera" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cameraOptions.map((camera) => (
+                    <SelectItem key={camera.id} value={camera.id}>
+                      {camera.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
+        )}
+        {fixed?.argument === "animation_id" && (
+          <Field label="Animation id" id={fieldId("clientAnimation")}>
+            <Input
+              id={fieldId("clientAnimation")}
+              className="font-mono text-xs"
+              value={typeof args.animation_id === "string" ? args.animation_id : ""}
+              onChange={(event) =>
+                update({
+                  argsTemplate: argsTemplateWith(action.argsTemplate, {
+                    animation_id: event.target.value,
+                  }),
+                })
+              }
+            />
+          </Field>
+        )}
+        <Field label="Arguments (JSON, templates allowed)" id={fieldId("clientArgs")}>
+          <Textarea
+            id={fieldId("clientArgs")}
+            rows={5}
+            className="font-mono text-xs"
+            value={action.argsTemplate}
+            onChange={(event) => update({ argsTemplate: event.target.value })}
+          />
+        </Field>
+        <Field label="Output variable" id={fieldId("clientOutput")}>
+          <Input
+            id={fieldId("clientOutput")}
+            className="font-mono text-xs"
+            value={action.outputVariable}
+            onChange={(event) => update({ outputVariable: event.target.value })}
+          />
+        </Field>
+        <p className="text-xs text-muted-foreground">
+          The run pauses until Unity returns the tool result; a result with <code>ok: false</code>{" "}
+          follows the error handle.
+        </p>
+      </div>
+    );
+  }
+
+  if (nodeType === "reply") {
+    const reply = data as ReplyNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <TemplateField
+          label="Reply template"
+          value={reply.template}
+          onChange={(value) => update({ template: value })}
+          variables={variables}
+          knownNodeIds={knownNodeIds}
+        />
+      </div>
+    );
+  }
+
+  if (nodeType === "subflow_input") {
+    const input = data as SubflowInputNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Parameters</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Add parameter"
+            onClick={() =>
+              update({
+                params: [...input.params, { name: "param", type: "string", required: true }],
+              })
+            }
+          >
+            <Plus />
+            Add
+          </Button>
+        </div>
+        {input.params.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Callers must pass every required parameter. Arrays of values are not supported in v1.
+          </p>
+        ) : (
+          input.params.map((param, index) => (
+            <div key={param.name} className="space-y-2 rounded-md border p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`Parameter ${index + 1} name`}
+                  className="font-mono text-xs"
+                  value={param.name}
+                  onChange={(event) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, name: event.target.value } : entry,
+                      ),
+                    })
+                  }
+                />
+                <Select
+                  value={param.type}
+                  onValueChange={(value) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, type: value } : entry,
+                      ),
+                    })
+                  }
+                >
+                  <SelectTrigger aria-label={`Parameter ${index + 1} type`} className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="string">string</SelectItem>
+                    <SelectItem value="number">number</SelectItem>
+                    <SelectItem value="boolean">boolean</SelectItem>
+                    <SelectItem value="json">json</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove parameter ${index + 1}`}
+                  onClick={() =>
+                    update({ params: input.params.filter((_, position) => position !== index) })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <Label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={param.required}
+                  onCheckedChange={(checked) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, required: checked === true } : entry,
+                      ),
+                    })
+                  }
+                />
+                Required
+              </Label>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  if (nodeType === "subflow_output") {
+    const output = data as SubflowOutputNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Branch label" id={fieldId("subflowLabel")}>
+          <Input
+            id={fieldId("subflowLabel")}
+            value={output.label}
+            onChange={(event) => update({ label: event.target.value })}
+          />
+        </Field>
+        <p className="text-xs text-muted-foreground">
+          Each output label becomes a separate output handle on the Call Subflow node.
+        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Return values</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Add return value"
+            onClick={() => update({ values: [...output.values, { name: "value", value: "" }] })}
+          >
+            <Plus />
+            Add
+          </Button>
+        </div>
+        {output.values.map((entry, index) => (
+          <div key={entry.name} className="space-y-2 rounded-md border p-2">
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={`Return value ${index + 1} name`}
+                className="font-mono text-xs"
+                value={entry.name}
+                onChange={(event) =>
+                  update({
+                    values: output.values.map((item, position) =>
+                      position === index ? { ...item, name: event.target.value } : item,
+                    ),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove return value ${index + 1}`}
+                onClick={() =>
+                  update({ values: output.values.filter((_, position) => position !== index) })
+                }
+              >
+                <Trash2 />
+              </Button>
+            </div>
+            <TemplateField
+              placeholder={`Return value for ${entry.name}`}
+              value={entry.value}
+              onChange={(value) =>
+                update({
+                  values: output.values.map((item, position) =>
+                    position === index ? { ...item, value } : item,
+                  ),
+                })
+              }
+              variables={variables}
+              knownNodeIds={knownNodeIds}
+              rows={2}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (nodeType === "call_subflow") {
+    const call = data as CallSubflowNodeData;
+    const target = subflows.find((entry) => entry.id === call.subflowId);
+
+    const chooseTarget = (value: string) => {
+      const next = subflows.find((entry) => entry.id === value);
+      if (!next) {
+        update({ subflowId: null, subflowName: undefined, inputs: [], outputs: [] });
+        return;
+      }
+      const existingInputs = new Map(call.inputs.map((entry) => [entry.name, entry.value]));
+      const existingOutputs = new Map(call.outputs.map((entry) => [entry.label, entry.variable]));
+      update({
+        subflowId: next.id,
+        subflowName: next.name,
+        inputs: next.params.map((param) => ({
+          name: param.name,
+          value: existingInputs.get(param.name) ?? "",
+        })),
+        outputs: next.outputs.map((label) => ({
+          label,
+          variable:
+            existingOutputs.get(label) ??
+            `subflow_${label.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([^A-Za-z_])/, "x$1")}`,
+        })),
+      });
+    };
+
+    const syncOutputs = () => {
+      if (!target) return;
+      const existingOutputs = new Map(call.outputs.map((entry) => [entry.label, entry.variable]));
+      update({
+        outputs: target.outputs.map((label) => ({
+          label,
+          variable:
+            existingOutputs.get(label) ??
+            `subflow_${label.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([^A-Za-z_])/, "x$1")}`,
+        })),
+      });
+    };
+
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Subflow" id={fieldId("subflow")}>
+          <Select value={call.subflowId ?? "none"} onValueChange={chooseTarget}>
+            <SelectTrigger id={fieldId("subflow")} className="w-full">
+              <SelectValue placeholder="Choose a published subflow" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Choose a subflow</SelectItem>
+              {subflows.map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {entry.name} (v{entry.version})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {call.subflowId && !target && (
+          <p className="text-xs text-destructive">
+            This subflow is not published (or was deleted). Publish it and pick it again.
+          </p>
+        )}
+        {target && (
+          <>
+            <div className="space-y-2">
+              <span className="text-xs font-medium">Inputs</span>
+              {target.params.length === 0 ? (
+                <p className="text-xs text-muted-foreground">This subflow takes no inputs.</p>
+              ) : (
+                target.params.map((param) => (
+                  <div key={param.name} className="space-y-1">
+                    <Label className="text-xs">
+                      <span className="font-mono">{param.name}</span>
+                      <span className="text-muted-foreground"> · {param.type}</span>
+                      {param.required && <span className="text-destructive"> *</span>}
+                    </Label>
+                    <TemplateField
+                      placeholder={`Value for ${param.name}`}
+                      value={call.inputs.find((entry) => entry.name === param.name)?.value ?? ""}
+                      onChange={(value) => {
+                        const others = call.inputs.filter((entry) => entry.name !== param.name);
+                        update({ inputs: [...others, { name: param.name, value }] });
+                      }}
+                      variables={variables}
+                      knownNodeIds={knownNodeIds}
+                      multiline={false}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">Outputs</span>
+                <Button type="button" variant="outline" size="xs" onClick={syncOutputs}>
+                  Sync outputs
+                </Button>
+              </div>
+              {call.outputs.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Sync to create one branch handle per output label.
+                </p>
+              ) : (
+                call.outputs.map((output, index) => (
+                  <div key={output.label} className="flex items-center gap-2">
+                    <span className="w-24 truncate text-xs" title={output.label}>
+                      {output.label}
+                    </span>
+                    <Input
+                      aria-label={`Output ${output.label} variable`}
+                      className="font-mono text-xs"
+                      value={output.variable}
+                      onChange={(event) =>
+                        update({
+                          outputs: call.outputs.map((entry, position) =>
+                            position === index ? { ...entry, variable: event.target.value } : entry,
+                          ),
+                        })
+                      }
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return <div className="space-y-4 p-4">{common}</div>;
+}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { renderSessionMarkdown } from "@/lib/session-markdown";
 import type { SessionDetail, TranscriptItemView } from "@/lib/session-types";
 import { csvField } from "@/server/services/session-export";
@@ -15,6 +15,7 @@ function item(
     tool_name: null,
     tool_args: null,
     tool_source: null,
+    duration_ms: null,
     llm_request_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     ...partial,
@@ -36,6 +37,8 @@ const session: SessionDetail = {
   ended_at: null,
   turn_count: 1,
   system_prompt_hash: null,
+  run_logs: [],
+  memory: [],
   turns: [
     {
       id: "t1",

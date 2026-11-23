@@ -18,6 +18,7 @@ import {
   turns,
 } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/errors";
+import { listRunLogs, listSessionMemory } from "@/server/services/run-logs";
 import { deleteSessionsByIds } from "@/server/services/session-maintenance";
 
 export type SessionFilters = Partial<SessionFiltersInput>;
@@ -120,6 +121,7 @@ function toItemView(row: typeof transcriptItems.$inferSelect): TranscriptItemVie
     tool_name: row.toolName,
     tool_args: row.toolArgs ?? null,
     tool_source: row.toolSource,
+    duration_ms: row.durationMs,
     llm_request_id: row.llmRequestId,
     created_at: row.createdAt.toISOString(),
   };
@@ -175,6 +177,7 @@ export async function findSessionDetail(id: string): Promise<SessionDetail | und
       .where(eq(llmRequests.sessionId, id))
       .orderBy(asc(llmRequests.startedAt)),
   ]);
+  const [runLogRows, memoryRows] = await Promise.all([listRunLogs(id), listSessionMemory(id)]);
 
   const turnViews: TurnView[] = turnRows.map((turn) => ({
     id: turn.id,
@@ -191,6 +194,8 @@ export async function findSessionDetail(id: string): Promise<SessionDetail | und
     ...toSummary(row),
     system_prompt_hash: row.session.systemPromptHash,
     turns: turnViews,
+    run_logs: runLogRows,
+    memory: memoryRows,
   };
 }
 

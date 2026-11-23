@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+﻿import { desc } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
 import { createApiApp } from "@/server/api/app";
 import { closeDatabase, getDb } from "@/server/db/client";
@@ -73,12 +73,11 @@ describe("client API: routing, failover and auth", () => {
   const userMessage = [{ role: "user", content: "secret user prompt text" }];
 
   describe("passthrough", () => {
-    it("forwards a JSON completion with model rewrite, stripped agent_id and unknown fields", async () => {
+    it("forwards a JSON completion with model rewrite and unknown fields", async () => {
       await seedRoute("avatar-default", [{ providerId: providerA.id, model: "ok" }]);
       const response = await chat({
         model: "avatar-default",
         messages: userMessage,
-        agent_id: "agt_123",
         reasoning_effort: "low",
         custom_flag: { nested: true },
       });
