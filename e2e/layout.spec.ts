@@ -3,6 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
 import { makePng } from "../tests/support/media-files";
 import {
+  AGENT_FLOW_NAME,
   cameraNames,
   keyLabel,
   mcpServerName,
@@ -10,6 +11,8 @@ import {
   providerNames,
   routeSlug,
   type SessionIds,
+  SUBFLOW_FLOW_ENV,
+  subflowNames,
 } from "./layout-seed";
 
 /**
@@ -31,6 +34,7 @@ const runId = Date.now().toString(36);
 
 const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
 const agentFlowId = process.env.LAYOUT_QA_FLOW_ID ?? "";
+const subflowFlowId = process.env[SUBFLOW_FLOW_ENV] ?? "";
 
 // Reduced motion: dialogs fade in, and axe would sample half-transparent text mid-animation.
 test.use({ httpCredentials: { username, password }, reducedMotion: "reduce" });
@@ -457,6 +461,42 @@ for (const viewport of viewports) {
       await expectDialogContained(page);
       await page.keyboard.press("Escape");
       await expect(remove).toBeFocused();
+    });
+
+    test("chatflows: Agents / Subflows filter narrows the list", async ({ page }) => {
+      await openPage(page, "/chatflows");
+      const filter = page.getByRole("group", { name: "Filter by kind" });
+      const subflowsFilter = filter.getByRole("button", { name: /^Subflows/ });
+      const agentsFilter = filter.getByRole("button", { name: /^Agents/ });
+      await subflowsFilter.click();
+      await expect(subflowsFilter).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(subflowNames.caller).first()).toBeVisible();
+      await expect(page.getByText(AGENT_FLOW_NAME).first()).toHaveCount(0);
+      await expectNoHorizontalScroll(page);
+      await agentsFilter.click();
+      await expect(agentsFilter).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(AGENT_FLOW_NAME).first()).toBeVisible();
+      await expect(page.getByText(subflowNames.caller).first()).toHaveCount(0);
+      await expectNamedControls(page);
+    });
+
+    test("subflow editor: Input, Output and Call Subflow property panels", async ({ page }) => {
+      if (viewport.width < 1024) return;
+      await openPage(page, `/chatflows/${subflowFlowId}`);
+      await expect(page.getByText("Subflow", { exact: true }).first()).toBeVisible();
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+
+      await page.locator('[data-node-type="subflow_input"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByText("Parameters", { exact: true })).toBeVisible();
+
+      await page.locator('[data-node-type="subflow_output"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByLabel("Branch label")).toBeVisible();
+
+      await page.locator('[data-node-type="call_subflow"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByRole("combobox", { name: "Subflow" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sync outputs" })).toBeVisible();
+      await expectNoSeriousAxeViolations(page);
     });
 
     test("chatflow editor: layout, dialogs and test drawer", async ({ page }) => {

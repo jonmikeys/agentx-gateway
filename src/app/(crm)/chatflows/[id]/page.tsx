@@ -1,6 +1,6 @@
 ﻿import { notFound } from "next/navigation";
 import { ChatflowEditor } from "@/app/(crm)/chatflows/[id]/chatflow-editor";
-import { getFlow } from "@/server/services/agents";
+import { getFlow, listPublishedSubflows } from "@/server/services/agents";
 import { listAllowedMcpTools, listMcpServers } from "@/server/services/mcp";
 import { listRoutes } from "@/server/services/routes";
 
@@ -14,10 +14,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   } catch {
     notFound();
   }
-  const [routes, servers, tools] = await Promise.all([
+  const [routes, servers, tools, subflows] = await Promise.all([
     listRoutes(),
     listMcpServers(),
     listAllowedMcpTools(),
+    listPublishedSubflows(),
   ]);
   return (
     <ChatflowEditor
@@ -36,6 +37,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         server_id: tool.server_id,
         server_name: tool.server_name,
       }))}
+      subflows={subflows}
     />
   );
 }

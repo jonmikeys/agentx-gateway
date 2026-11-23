@@ -39,14 +39,17 @@ import type { FlowDetail, FlowSummary } from "@/lib/agents/types";
 export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [createKind, setCreateKind] = useState<"agent" | "subflow">("agent");
   const [deleting, setDeleting] = useState<FlowSummary | undefined>();
   const [busyId, setBusyId] = useState<string | undefined>();
+  const [kindFilter, setKindFilter] = useState<"all" | "agent" | "subflow">("all");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
-  function openCreate() {
+  function openCreate(kind: "agent" | "subflow" = "agent") {
+    setCreateKind(kind);
     setName("");
     setSlug("");
     setDescription("");
@@ -64,11 +67,12 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
         method: "POST",
         body: {
           name: name.trim(),
+          kind: createKind,
           description: description.trim(),
           ...(slug.trim() ? { slug: slug.trim() } : {}),
         },
       });
-      toast.success("Chatflow created");
+      toast.success(createKind === "subflow" ? "Subflow created" : "Chatflow created");
       router.push(`/chatflows/${created.id}`);
     } catch (error) {
       toast.error(errorMessage(error));
@@ -76,6 +80,11 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
       setSaving(false);
     }
   }
+
+  const visibleFlows = useMemo(
+    () => (kindFilter === "all" ? flows : flows.filter((flow) => flow.kind === kindFilter)),
+    [flows, kindFilter],
+  );
 
   const toggleEnabled = useCallback(
     async (flow: FlowSummary, enabled: boolean) => {
@@ -222,12 +231,42 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
         title="Chatflows"
         description="Design agents and subflows in the visual chatflow editor."
         action={
-          <Button onClick={openCreate}>
-            <Plus />
-            New chatflow
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => openCreate("agent")}>
+              <Plus />
+              New chatflow
+            </Button>
+            <Button variant="outline" onClick={() => openCreate("subflow")}>
+              <Plus />
+              New subflow
+            </Button>
+          </div>
         }
       />
+
+      <fieldset className="flex flex-wrap items-center gap-1">
+        <legend className="sr-only">Filter by kind</legend>
+        {(
+          [
+            ["all", "All"],
+            ["agent", "Agents"],
+            ["subflow", "Subflows"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={kindFilter === value ? "secondary" : "outline"}
+            aria-pressed={kindFilter === value}
+            onClick={() => setKindFilter(value)}
+          >
+            {label}
+            <span className="text-xs">
+              {flows.filter((flow) => value === "all" || flow.kind === value).length}
+            </span>
+          </Button>
+        ))}
+      </fieldset>
 
       {flows.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center">
@@ -239,21 +278,27 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
               clients.
             </p>
           </div>
-          <Button onClick={openCreate}>
+          <Button onClick={() => openCreate("agent")}>
             <Plus />
             New chatflow
           </Button>
         </div>
       ) : (
-        <DataTable columns={columns} data={flows} emptyMessage="No chatflows yet." />
+        <DataTable
+          columns={columns}
+          data={visibleFlows}
+          emptyMessage={kindFilter === "all" ? "No chatflows yet." : `No ${kindFilter}s yet.`}
+        />
       )}
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New chatflow</DialogTitle>
+            <DialogTitle>{createKind === "subflow" ? "New subflow" : "New chatflow"}</DialogTitle>
             <DialogDescription>
-              Agents are published chatflows. You can rename, duplicate and disable them later.
+              {createKind === "subflow"
+                ? "Subflows are reusable flows called from agents or other subflows. They never appear in /v1/agents or /v1/models."
+                : "Agents are published chatflows. You can rename, duplicate and disable them later."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
@@ -296,7 +341,11 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
               Cancel
             </Button>
             <Button onClick={create} disabled={saving}>
-              {saving ? "Creating…" : "Create chatflow"}
+              {saving
+                ? "Creating…"
+                : createKind === "subflow"
+                  ? "Create subflow"
+                  : "Create chatflow"}
             </Button>
           </DialogFooter>
         </DialogContent>

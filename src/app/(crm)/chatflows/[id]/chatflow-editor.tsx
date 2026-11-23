@@ -56,11 +56,11 @@ import {
   createFlowNode,
   type FlowNode,
   type NodeType,
-  nodeCatalog,
+  nodeCatalogFor,
   nodeHandles,
 } from "@/lib/agents/graph";
 import { variableSuggestions } from "@/lib/agents/templates";
-import type { FlowDetail } from "@/lib/agents/types";
+import type { FlowDetail, SubflowOption } from "@/lib/agents/types";
 import { problemsByNode, validateGraph } from "@/lib/agents/validate";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +74,9 @@ const nodeTypes = {
   mcp_tool: FlowNodeCard,
   reply: FlowNodeCard,
   end: FlowNodeCard,
+  subflow_input: FlowNodeCard,
+  subflow_output: FlowNodeCard,
+  call_subflow: FlowNodeCard,
 };
 
 const nodeIcon = (type: NodeType) => {
@@ -93,6 +96,7 @@ interface ChatflowEditorProps {
   routes: string[];
   mcpServers: { id: string; name: string; slug: string; enabled: boolean }[];
   mcpTools: McpOption[];
+  subflows: SubflowOption[];
 }
 
 function variableNames(nodes: EditorNode[]): string[] {
@@ -105,12 +109,23 @@ function variableNames(nodes: EditorNode[]): string[] {
         if (typeof assignment.key === "string") names.add(assignment.key);
       }
     }
+    if (Array.isArray(data.outputs)) {
+      for (const output of data.outputs as { variable?: unknown }[]) {
+        if (typeof output.variable === "string") names.add(output.variable);
+      }
+    }
   }
   return [...names];
 }
 
 /** Visual chatflow editor: palette, canvas, inspector, publish/version dialogs and the test drawer. */
-export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: ChatflowEditorProps) {
+export function ChatflowEditor({
+  initialFlow,
+  routes,
+  mcpServers,
+  mcpTools,
+  subflows,
+}: ChatflowEditorProps) {
   const router = useRouter();
   const [flow, setFlow] = useState(initialFlow);
   const [view, setView] = useState<"editor" | "settings">("editor");
@@ -145,6 +160,23 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
     [nodes],
   );
   const selected = nodes.find((node) => node.selected);
+
+  // "Update available" for Call Subflow nodes whose target gained a published version since the
+  // version this flow currently pins.
+  const nodeBadges = useMemo(() => {
+    const badges = new Map<string, string>();
+    for (const node of nodes) {
+      if (node.type !== "call_subflow") continue;
+      const subflowId = (node.data as { subflowId?: string | null }).subflowId;
+      if (!subflowId) continue;
+      const latest = subflows.find((entry) => entry.id === subflowId)?.version;
+      const pinned = flow.pinned_subflows[subflowId];
+      if (latest !== undefined && pinned !== undefined && latest > pinned) {
+        badges.set(node.id, `Update v${pinned} → v${latest}`);
+      }
+    }
+    return badges;
+  }, [nodes, subflows, flow.pinned_subflows]);
 
   function pushHistory() {
     past.current.push({ nodes, edges });
@@ -184,7 +216,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
     const editorNode = toEditorNodes({ nodes: [created], edges: [] })[0];
     pushHistory();
     let nextEdges = edges;
-    if (anchor && anchor.type !== "end" && type !== "start") {
+    if (anchor && anchor.type !== "end" && anchor.type !== "subflow_output" && type !== "start") {
       const anchorFlow = {
         id: anchor.id,
         type: anchor.type,
@@ -368,7 +400,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
           <p className="px-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {group}
           </p>
-          {nodeCatalog
+          {nodeCatalogFor(flow.kind)
             .filter((entry) => entry.group === group)
             .map((entry) => {
               const Icon = nodeIcon(entry.type);
@@ -398,6 +430,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
       routes={routes}
       mcpServers={mcpServers}
       mcpTools={mcpTools}
+      subflows={subflows}
       variables={variables}
       knownNodeIds={knownNodeIds}
       onChange={updateNodeData}
@@ -419,6 +452,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
         problems,
         runningNodeId,
         traceNodeId,
+        nodeBadges,
         onRename: (nodeId, title) =>
           setNodes((current) =>
             current.map((node) =>
@@ -436,6 +470,7 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
             </Link>
           </Button>
           <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight">{flow.name}</h1>
+          <Badge variant="outline">{flow.kind === "subflow" ? "Subflow" : "Agent"}</Badge>
           <Badge variant="secondary">
             {flow.published_version === null ? "Draft" : `v${flow.published_version}`}
           </Badge>

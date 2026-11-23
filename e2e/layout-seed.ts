@@ -42,6 +42,11 @@ export const AGENT_FLOW_NAME =
   "Layout QA agent with an extremely long display name that keeps going and going 123";
 export const AGENT_FLOW_ENV = "LAYOUT_QA_FLOW_ID";
 export const SESSION_IDS_ENV = "LAYOUT_QA_SESSION_IDS";
+export const SUBFLOW_FLOW_ENV = "LAYOUT_QA_SUBFLOW_ID";
+export const subflowNames = {
+  leaf: "Layout QA leaf subflow with a long display name that keeps going 123",
+  caller: "Layout QA caller subflow with a long display name that keeps going 123",
+};
 
 async function seedMediaAndCameras(admin: APIRequestContext) {
   const names = async (collection: string) =>
@@ -145,6 +150,7 @@ export interface SessionIds {
 }
 let mediaServer: MockMediaServer;
 let agentFlowId = "";
+let subflowFlowId = "";
 let mjpeg: MockMjpeg;
 let mcp: MockMcp;
 const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
@@ -281,6 +287,119 @@ async function seedAgent(admin: APIRequestContext) {
     expect(published.status()).toBe(201);
   }
   agentFlowId = flow.id;
+}
+
+/**
+ * Seeds a published leaf subflow and a published caller subflow, so the layout checks can open
+ * the Subflow Input/Output and Call Subflow property panels.
+ */
+async function seedSubflows(admin: APIRequestContext) {
+  const flows = ((await (await admin.get("/api/admin/flows")).json()).data ?? []) as {
+    id: string;
+    slug: string;
+    published_version: number | null;
+  }[];
+  const ensureFlow = async (name: string, slug: string) => {
+    const existing = flows.find((entry) => entry.slug === slug);
+    if (existing) return existing;
+    const response = await admin.post("/api/admin/flows", {
+      data: { name, slug, kind: "subflow", description: "", enabled: true },
+    });
+    expect(response.status()).toBe(201);
+    return (await response.json()) as {
+      id: string;
+      slug: string;
+      published_version: number | null;
+    };
+  };
+  const publish = async (id: string) => {
+    const response = await admin.post(`/api/admin/flows/${id}/publish`, {
+      data: { note: "Layout QA subflow" },
+    });
+    expect(response.status()).toBe(201);
+  };
+
+  const leaf = await ensureFlow(subflowNames.leaf, "layout-qa-subflow-leaf");
+  const leafInput = {
+    id: "input_leaf",
+    type: "subflow_input",
+    position: { x: 0, y: 0 },
+    data: { title: "Input with a long title that stresses the card", params: [] },
+  };
+  const leafOutput = {
+    id: "output_leaf",
+    type: "subflow_output",
+    position: { x: 320, y: 0 },
+    data: {
+      title: "Output",
+      label: "result",
+      values: [{ name: "value", value: "leaf: {{input.text}}" }],
+    },
+  };
+  const leafDraft = await admin.put(`/api/admin/flows/${leaf.id}/draft`, {
+    data: {
+      graph: {
+        nodes: [leafInput, leafOutput],
+        edges: [{ id: "e_leaf", source: leafInput.id, target: leafOutput.id, sourceHandle: "out" }],
+      },
+    },
+  });
+  expect(leafDraft.status()).toBe(200);
+  if (leaf.published_version === null) await publish(leaf.id);
+
+  const caller = await ensureFlow(subflowNames.caller, "layout-qa-subflow-caller");
+  const input = {
+    id: "input_caller",
+    type: "subflow_input",
+    position: { x: 0, y: 0 },
+    data: {
+      title: "Input",
+      params: [
+        { name: "topic", type: "string", required: false },
+        {
+          name: "a_very_long_parameter_name_that_stresses_the_panel",
+          type: "json",
+          required: false,
+        },
+      ],
+    },
+  };
+  const call = {
+    id: "call_caller",
+    type: "call_subflow",
+    position: { x: 300, y: 0 },
+    data: {
+      title: "Call the leaf with a long title that stresses the card",
+      subflowId: leaf.id,
+      subflowName: subflowNames.leaf,
+      inputs: [{ name: "topic", value: "{{input.text}}" }],
+      outputs: [{ label: "result", variable: "leaf_result" }],
+    },
+  };
+  const output = {
+    id: "output_caller",
+    type: "subflow_output",
+    position: { x: 640, y: 0 },
+    data: {
+      title: "Output",
+      label: "result",
+      values: [{ name: "value", value: "{{vars.leaf_result}}" }],
+    },
+  };
+  const callerDraft = await admin.put(`/api/admin/flows/${caller.id}/draft`, {
+    data: {
+      graph: {
+        nodes: [input, call, output],
+        edges: [
+          { id: "e_in", source: input.id, target: call.id, sourceHandle: "out" },
+          { id: "e_out", source: call.id, target: output.id, sourceHandle: "out:result" },
+        ],
+      },
+    },
+  });
+  expect(callerDraft.status()).toBe(200);
+  if (caller.published_version === null) await publish(caller.id);
+  subflowFlowId = caller.id;
 }
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
@@ -508,6 +627,7 @@ export default async function globalSetup() {
   try {
     await seed(admin, upstream);
     await seedAgent(admin);
+    await seedSubflows(admin);
     await seedMcp(admin);
     await seedMediaAndCameras(admin);
     await seedSessions(admin, baseURL);
@@ -516,6 +636,7 @@ export default async function globalSetup() {
   }
   process.env[SESSION_IDS_ENV] = JSON.stringify(sessionIds);
   process.env[AGENT_FLOW_ENV] = agentFlowId;
+  process.env[SUBFLOW_FLOW_ENV] = subflowFlowId;
   return async () => {
     await upstream.close();
     await mediaServer.close();
