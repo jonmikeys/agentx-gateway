@@ -1,4 +1,4 @@
-﻿import { expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 /**
  * G7a end-to-end: create a chatflow in the editor, change its Reply template, publish it, run a
@@ -17,8 +17,6 @@ test.use({
 test.describe.configure({ mode: "default" });
 
 test("build, publish and test a chatflow", async ({ page }) => {
-  // The full suite runs in parallel with the heavy layout spec; allow for a busy server.
-  test.setTimeout(120_000);
   await page.goto("/chatflows");
   await expect(page.getByRole("heading", { name: "Chatflows", level: 1 })).toBeVisible();
 
@@ -63,7 +61,6 @@ test("build, publish and test a chatflow", async ({ page }) => {
 });
 
 test("add a Client Action node and pick media for it", async ({ page }) => {
-  test.setTimeout(120_000);
   await page.goto("/chatflows");
   await page.getByRole("button", { name: "New chatflow" }).first().click();
   await page.getByRole("textbox", { name: "Name" }).fill(`E2E client action ${runId}`);
