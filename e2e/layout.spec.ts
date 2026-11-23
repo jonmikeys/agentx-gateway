@@ -1,8 +1,9 @@
-﻿import AxeBuilder from "@axe-core/playwright";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
 import { makePng } from "../tests/support/media-files";
 import {
+  AGENT_FLOW_NAME,
   cameraNames,
   keyLabel,
   mcpServerName,
@@ -10,6 +11,8 @@ import {
   providerNames,
   routeSlug,
   type SessionIds,
+  SUBFLOW_FLOW_ENV,
+  subflowNames,
 } from "./layout-seed";
 
 /**
@@ -31,6 +34,8 @@ const runId = Date.now().toString(36);
 
 const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
 const agentFlowId = process.env.LAYOUT_QA_FLOW_ID ?? "";
+const clientFlowId = process.env.LAYOUT_QA_CLIENT_FLOW_ID ?? "";
+const subflowFlowId = process.env[SUBFLOW_FLOW_ENV] ?? "";
 
 // Reduced motion: dialogs fade in, and axe would sample half-transparent text mid-animation.
 test.use({ httpCredentials: { username, password }, reducedMotion: "reduce" });
@@ -459,43 +464,159 @@ for (const viewport of viewports) {
       await expect(remove).toBeFocused();
     });
 
+    test("chatflows: Agents / Subflows filter narrows the list", async ({ page }) => {
+      await openPage(page, "/chatflows");
+      const filter = page.getByRole("group", { name: "Filter by kind" });
+      const subflowsFilter = filter.getByRole("button", { name: /^Subflows/ });
+      const agentsFilter = filter.getByRole("button", { name: /^Agents/ });
+      await subflowsFilter.click();
+      await expect(subflowsFilter).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(subflowNames.caller).first()).toBeVisible();
+      await expect(page.getByText(AGENT_FLOW_NAME).first()).toHaveCount(0);
+      await expectNoHorizontalScroll(page);
+      await agentsFilter.click();
+      await expect(agentsFilter).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(AGENT_FLOW_NAME).first()).toBeVisible();
+      await expect(page.getByText(subflowNames.caller).first()).toHaveCount(0);
+      await expectNamedControls(page);
+    });
+
+    test("subflow editor: Input, Output and Call Subflow property panels", async ({ page }) => {
+      if (viewport.width < 1024) return;
+      await openPage(page, `/chatflows/${subflowFlowId}`);
+      await expect(page.getByText("Subflow", { exact: true }).first()).toBeVisible();
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+
+      await page.locator('[data-node-type="subflow_input"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByText("Parameters", { exact: true })).toBeVisible();
+
+      await page.locator('[data-node-type="subflow_output"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByLabel("Branch label")).toBeVisible();
+
+      await page.locator('[data-node-type="call_subflow"]').click({ position: { x: 12, y: 12 } });
+      await expect(page.getByRole("combobox", { name: "Subflow" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sync outputs" })).toBeVisible();
+      await expectNoSeriousAxeViolations(page);
+    });
+
     test("chatflow editor: layout, dialogs and test drawer", async ({ page }) => {
+      test.setTimeout(60_000);
       await openPage(page, `/chatflows/${agentFlowId}`);
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
 
-      const publish = page.getByRole("button", { name: "Publish", exact: true });
-      await publish.click();
-      await expect(page.getByText("Validation passed.")).toBeVisible();
-      await expectNoMojibake(page);
-      await expectDialogContained(page);
-      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog")).toHaveCount(0);
-      await expect(publish).toBeFocused();
+      for (const name of [
+        "Group selected nodes",
+        "Ungroup selected group",
+        "Hide notes and comments",
+        "Fit view",
+        "Export flow as JSON",
+      ]) {
+        await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+      }
 
-      const versions = page.getByRole("button", { name: "Versions", exact: true });
-      await versions.click();
-      await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
-      await expectDialogContained(page);
-      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
-      await page.keyboard.press("Escape");
-      await expect(versions).toBeFocused();
+      await test.step("node comment popover", async () => {
+        // Start node carries a comment in the seed. Dispatch the click so the narrow mobile
+        // viewport (where the node can sit partly outside the canvas) still opens the popover.
+        const comment = page.getByRole("button", { name: "Show comment" }).first();
+        await comment.evaluate((element) => (element as HTMLElement).click());
+        await expect(page.getByText(/Last edited/)).toBeVisible();
+        if (viewport.name === "desktop") {
+          const popover = await page.locator('[data-slot="popover-content"]').boundingBox();
+          expect(popover?.x ?? -1).toBeGreaterThanOrEqual(0);
+          expect((popover?.x ?? 0) + (popover?.width ?? 0)).toBeLessThanOrEqual(viewport.width + 1);
+        }
+        await expectNoSeriousAxeViolations(page, '[data-slot="popover-content"]');
+        await page.keyboard.press("Escape");
+        await expect(comment).toBeFocused();
+      });
 
       const settings = page.getByRole("button", { name: "Settings", exact: true });
       await settings.click();
       await expect(page.getByLabel("Name")).toBeVisible();
+      await expect(page.getByLabel("Allowed media tags")).toBeVisible();
+      await expect(page.getByText("Allowed cameras", { exact: true })).toBeVisible();
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
       await settings.click();
 
-      const openDrawer = page.getByRole("button", { name: "Open test drawer" });
-      await openDrawer.click();
-      await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
-      await expectNoMojibake(page);
+      await test.step("publish dialog", async () => {
+        const publish = page.getByRole("button", { name: "Publish", exact: true });
+        await publish.click();
+        await expect(page.getByText("Validation passed.")).toBeVisible();
+        await expectNoMojibake(page);
+        await expectDialogContained(page);
+        await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(publish).toBeFocused();
+      });
+
+      await test.step("version diff", async () => {
+        const versions = page.getByRole("button", { name: "Versions", exact: true });
+        await versions.click();
+        await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
+        await page
+          .getByRole("button", { name: /^View version/ })
+          .first()
+          .click();
+        await page.getByRole("button", { name: "Compare with draft" }).click();
+        await expect(page.getByTestId("version-diff")).toBeVisible();
+        await expectDialogContained(page);
+        await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+        await page.keyboard.press("Escape");
+        await expect(versions).toBeFocused();
+      });
+
+      await test.step("hide annotations toggle", async () => {
+        const hide = page.getByRole("button", { name: "Hide notes and comments" });
+        await hide.click();
+        await expect(hide).toHaveAttribute("aria-pressed", "true");
+        await hide.click();
+        await expect(hide).toHaveAttribute("aria-pressed", "false");
+      });
+
+      await test.step("settings view", async () => {
+        const settings = page.getByRole("button", { name: "Settings", exact: true });
+        await settings.click();
+        await expect(page.getByLabel("Name")).toBeVisible();
+        await expectNoHorizontalScroll(page);
+        await expectNamedControls(page);
+        await settings.click();
+      });
+
+      await test.step("test drawer", async () => {
+        const openDrawer = page.getByRole("button", { name: "Open test drawer" });
+        await openDrawer.click();
+        await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
+        await expectNoMojibake(page);
+        await expectNoHorizontalScroll(page);
+        await expectNamedControls(page);
+        await page.getByRole("button", { name: "Close test drawer" }).click();
+      });
+    });
+
+    test("chatflow editor: Client Action media picker fits the properties panel", async ({
+      page,
+    }) => {
+      await openPage(page, `/chatflows/${clientFlowId}`);
+      await page.locator('[data-node-type="client_action"]').click({ position: { x: 12, y: 12 } });
+      if (viewport.name === "mobile") {
+        await page.getByRole("button", { name: "Properties" }).click();
+      }
+      const media = page.getByLabel("Media item");
+      const mediaPicker = viewport.name === "mobile" ? media.last() : media.first();
+      await expect(mediaPicker).toBeVisible();
+      await mediaPicker.click();
+      await page.getByRole("option").first().click();
+      const args = page.getByLabel("Arguments (JSON, templates allowed)");
+      const argsEditor = viewport.name === "mobile" ? args.last() : args.first();
+      await expect(argsEditor).toHaveValue(/media_id/);
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
-      await page.getByRole("button", { name: "Close test drawer" }).click();
+      await expectNoSeriousAxeViolations(page);
+      if (viewport.name === "mobile") await page.keyboard.press("Escape");
     });
 
     for (const theme of themes) {
@@ -507,6 +628,18 @@ for (const viewport of viewports) {
         await expectNoSeriousAxeViolations(page);
       });
     }
+    test("chatflow import dialog stays inside the dialog", async ({ page }) => {
+      await openPage(page, "/chatflows");
+      const importButton = page.getByRole("button", { name: "Import JSON" });
+      await importButton.click();
+      await expect(page.getByRole("heading", { name: "Import chatflow JSON" })).toBeVisible();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(importButton).toBeFocused();
+    });
+
     test("command palette stays inside the dialog", async ({ page }) => {
       await openPage(page, "/");
       await page.getByRole("button", { name: /Search pages/ }).click();

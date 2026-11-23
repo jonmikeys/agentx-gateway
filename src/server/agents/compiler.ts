@@ -1,5 +1,6 @@
-import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
-import type { FlowGraph, FlowNode } from "@/lib/agents/graph";
+import { Annotation, END, interrupt, START, StateGraph } from "@langchain/langgraph";
+import type { ClientToolCall, ClientToolResult } from "@/lib/agents/client-tools";
+import { type FlowGraph, type FlowNode, isExecutableNode } from "@/lib/agents/graph";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { getCheckpointer } from "@/server/agents/checkpointer";
 import { AgentRuntimeError } from "@/server/agents/llm";
@@ -43,13 +44,39 @@ const AgentAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => null,
   }),
+  /** Client tool calls awaiting the client; the wait node interrupts and resumes here. */
+  pendingClientNode: Annotation<string>({ reducer: (_previous, next) => next, default: () => "" }),
+  pendingClientCalls: Annotation<ClientToolCall[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  clientResults: Annotation<ClientToolResult[]>({
+    reducer: (_previous, next) => next,
+    default: () => [],
+  }),
+  clientResultsNode: Annotation<string>({ reducer: (_previous, next) => next, default: () => "" }),
+  /** Subflow runs only: the Subflow Output label that ended the run. */
+  outputLabel: Annotation<string>({ reducer: (_previous, next) => next, default: () => "" }),
+  /** Subflow runs only: the return values of the reached Subflow Output. */
+  subflowOutput: Annotation<Record<string, unknown>>({
+    reducer: (_previous, next) => next,
+    default: () => ({}),
+  }),
 });
 
 type AgentChannels = typeof AgentAnnotation.State;
 
+/** Structural view of the checkpoint snapshot the runtime reads after a run. */
+export interface AgentSnapshot {
+  next: string[];
+  tasks: { interrupts: { value?: unknown }[] }[];
+  values?: Record<string, unknown>;
+}
+
 /** Minimal executor surface used by the runtime (keeps LangGraph's generic types contained). */
 export interface CompiledAgent {
   invoke(input: Partial<AgentChannels>, config?: unknown): Promise<AgentChannels>;
+  getState(config?: unknown): Promise<AgentSnapshot>;
 }
 
 const MAX_STRING = 4000;
@@ -102,6 +129,7 @@ function nodeRunner(node: FlowNode) {
           vars: outcome.vars,
           output: outcome.output,
         }),
+        ...(outcome.steps && outcome.steps.length > 0 ? { substeps: outcome.steps } : {}),
       };
       context.onNodeEnd?.(step);
       return {
@@ -114,6 +142,23 @@ function nodeRunner(node: FlowNode) {
         reasoning: outcome.reasoning ? state.reasoning + outcome.reasoning : state.reasoning,
         usage: addUsage(state.usage, outcome.usage),
         lastError: "",
+        ...(outcome.messages !== undefined ? { messages: outcome.messages } : {}),
+        ...(outcome.pendingClientNode !== undefined
+          ? { pendingClientNode: outcome.pendingClientNode }
+          : {}),
+        ...(outcome.pendingClientCalls !== undefined
+          ? { pendingClientCalls: outcome.pendingClientCalls }
+          : {}),
+        ...(outcome.clientResults !== undefined ? { clientResults: outcome.clientResults } : {}),
+        ...(outcome.clientResultsNode !== undefined
+          ? { clientResultsNode: outcome.clientResultsNode }
+          : {}),
+        ...(outcome.subflowOutput
+          ? {
+              outputLabel: outcome.subflowOutput.label,
+              subflowOutput: outcome.subflowOutput.values,
+            }
+          : {}),
       };
     } catch (error) {
       const durationMs = Math.round(performance.now() - startedMs);
@@ -142,6 +187,62 @@ function nodeRunner(node: FlowNode) {
   };
 }
 
+/** Resume payloads may be shaped as `{toolCallId, content}` or `{tool_call_id, content}`. */
+function normalizeResumeResults(value: unknown): ClientToolResult[] {
+  const list = Array.isArray(value) ? value : [];
+  const results: ClientToolResult[] = [];
+  for (const entry of list) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const id =
+      typeof record.toolCallId === "string"
+        ? record.toolCallId
+        : typeof record.tool_call_id === "string"
+          ? record.tool_call_id
+          : undefined;
+    if (!id) continue;
+    const content =
+      typeof record.content === "string" ? record.content : JSON.stringify(record.content ?? null);
+    results.push({ toolCallId: id, content });
+  }
+  return results;
+}
+
+/**
+ * The client-tool wait node: interrupts the run (checkpointed) and, once the next request
+ * delivers the results, hands them back to the originating node. It never calls a model, so
+ * resuming is cheap and idempotent.
+ */
+function waitRunner(node: FlowNode) {
+  return async (state: AgentChannels, config: unknown): Promise<Partial<AgentChannels>> => {
+    const context = contextOf(config);
+    const startedAt = new Date().toISOString();
+    const resumed = interrupt({
+      kind: "client_tools",
+      nodeId: node.id,
+      calls: state.pendingClientCalls,
+    });
+    const results = normalizeResumeResults(resumed);
+    const step: RunTraceStep = {
+      node_id: node.id,
+      node_type: "client_wait",
+      title: "Resumed",
+      status: "ok",
+      started_at: startedAt,
+      duration_ms: 0,
+      output: { tool_results: results },
+    };
+    context.onNodeEnd?.(step);
+    return {
+      clientResults: results,
+      clientResultsNode: node.id,
+      pendingClientNode: "",
+      pendingClientCalls: [],
+      trace: [...state.trace, step],
+    };
+  };
+}
+
 function buildGraph(graph: FlowGraph) {
   // The generic StateGraph type narrows node names to the literals it knows at build time; every
   // agent graph has dynamic node ids, so use a small structural view of the builder.
@@ -154,21 +255,44 @@ function buildGraph(graph: FlowGraph) {
     addConditionalEdges(from: string, fn: (state: AgentChannels) => string): void;
     compile(options?: { checkpointer?: unknown }): CompiledAgent;
   };
-  const start = graph.nodes.find((node) => node.type === "start");
-  if (!start) throw new AgentRuntimeError("flow_invalid", "The chatflow has no Start node.");
+  // Sticky notes and visual groups are canvas-only; the runtime sees a flat executable graph.
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
+  const start =
+    runtimeNodes.find((node) => node.type === "start") ??
+    runtimeNodes.find((node) => node.type === "subflow_input");
+  if (!start) {
+    throw new AgentRuntimeError(
+      "flow_invalid",
+      "The chatflow has no Start (agent) or Subflow Input (subflow) node.",
+    );
+  }
   // Node ids are user data and may collide with LangGraph state channel names (for example a
   // node called "memory"); prefix every graph node name and map targets back through it.
   const nameOf = (id: string) => `node_${id}`;
+  const waitNameOf = (id: string) => `wait_${id}`;
+  // Nodes that may pause for a client tool: LLM and Client Action nodes emit the calls, and a
+  // Call Subflow node pauses when a client tool fires inside the subflow it runs.
+  const canPauseForClient = (node: FlowNode) =>
+    node.type === "llm" || node.type === "client_action" || node.type === "call_subflow";
 
-  for (const node of graph.nodes) builder.addNode(nameOf(node.id), nodeRunner(node));
+  for (const node of runtimeNodes) {
+    builder.addNode(nameOf(node.id), nodeRunner(node));
+    if (!canPauseForClient(node)) continue;
+    // Pause here when the node produced client tool calls, then loop back to consume the results.
+    builder.addNode(waitNameOf(node.id), waitRunner(node));
+    builder.addEdge(waitNameOf(node.id), nameOf(node.id));
+  }
   builder.addEdge(START, nameOf(start.id));
 
-  for (const node of graph.nodes) {
-    if (node.type === "end") {
+  for (const node of runtimeNodes) {
+    if (node.type === "end" || node.type === "subflow_output") {
       builder.addEdge(nameOf(node.id), END);
       continue;
     }
     builder.addConditionalEdges(nameOf(node.id), (state) => {
+      if (canPauseForClient(node) && state.pendingClientNode === node.id) {
+        return waitNameOf(node.id);
+      }
       const target = resolveTarget(graph, node.id, state.cursor);
       return target ? nameOf(target) : END;
     });
@@ -184,22 +308,53 @@ export function clearCompiledGraphCache(): void {
 
 /**
  * Compiles a published graph to a LangGraph StateGraph, cached per flow version. The checkpointer
- * persists every run under `thread_id = session id` (G7b resumes interrupts from it).
+ * persists every run under `thread_id = session id`, so a client-tool interrupt can be resumed.
+ * Tests may pass their own in-memory checkpointer (bypassing the cache).
  */
 export async function compileAgentGraph(
   flowId: string,
   version: number,
   graph: FlowGraph,
+  injectedCheckpointer?: unknown,
 ): Promise<CompiledAgent> {
-  const key = `${flowId}@${version}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
+  const key = `agent:${flowId}@${version}`;
+  if (!injectedCheckpointer) {
+    const cached = cache.get(key);
+    if (cached) return cached;
+  }
 
-  const checkpointer = await getCheckpointer();
+  const checkpointer = injectedCheckpointer ?? (await getCheckpointer());
   const builder = buildGraph(graph);
   const compiled = (checkpointer
     ? builder.compile({ checkpointer })
     : builder.compile()) as unknown as CompiledAgent;
-  cache.set(key, compiled);
+  if (!injectedCheckpointer) cache.set(key, compiled);
+  return compiled;
+}
+
+/**
+ * Compiles a pinned subflow version as a nested graph. It is invoked under its own checkpoint
+ * thread (a child of the caller's), with the same checkpointer, so a client-tool interrupt raised
+ * inside it is checkpointed and can be resumed by replaying the parent's Call Subflow node.
+ * Tests may pass their own in-memory checkpointer (bypassing the cache).
+ */
+export async function compileSubflowGraph(
+  flowId: string,
+  version: number,
+  graph: FlowGraph,
+  injectedCheckpointer?: unknown,
+): Promise<CompiledAgent> {
+  const key = `subflow:${flowId}@${version}`;
+  if (!injectedCheckpointer) {
+    const cached = cache.get(key);
+    if (cached) return cached;
+  }
+
+  const checkpointer = injectedCheckpointer ?? (await getCheckpointer());
+  const builder = buildGraph(graph);
+  const compiled = (checkpointer
+    ? builder.compile({ checkpointer })
+    : builder.compile()) as unknown as CompiledAgent;
+  if (!injectedCheckpointer) cache.set(key, compiled);
   return compiled;
 }

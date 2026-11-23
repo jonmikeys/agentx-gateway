@@ -31,6 +31,10 @@ function state(overrides: Partial<AgentState> = {}): AgentState {
     lastError: "",
     fatal: false,
     failedNodeId: null,
+    pendingClientNode: "",
+    pendingClientCalls: [],
+    clientResults: [],
+    clientResultsNode: "",
     ...overrides,
   };
 }
@@ -52,9 +56,13 @@ function context(
       mcpCall: async () => ({ text: "ok", isError: false }),
       webhookHeaders: async () => ({}),
       memory: createInMemoryMemoryStore(),
+      loadSubflowVersion: async () => undefined,
     },
     emitText: () => {},
     signal: new AbortController().signal,
+    threadId: "11111111-1111-4111-8111-111111111111",
+    pinnedSubflows: {},
+    depth: 0,
   };
   return { ...base, ...overrides, deps: { ...base.deps, ...overrides.deps } };
 }

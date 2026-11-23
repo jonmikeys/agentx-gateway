@@ -22,6 +22,8 @@ describe("database migrations", () => {
   });
 
   afterAll(async () => {
+    // Rotation re-encrypts with throwaway keys; never leave those rows for the next file.
+    await sql`truncate table providers, cameras, mcp_servers, flow_webhook_secrets cascade`;
     await sql.end({ timeout: 2 });
   });
 
@@ -80,6 +82,10 @@ describe("database migrations", () => {
   it("rotates the real provider columns via the registry", async () => {
     const oldKey = generateEncryptionKey();
     const newKey = generateEncryptionKey();
+    // `rotateSecrets` walks the whole registry across the shared database, so other files'
+    // leftover rows (cameras, MCP headers, webhook secrets) would be decrypted with the wrong
+    // key. Clear every encrypted table so this test owns the state and its count is exact.
+    await sql`truncate table providers, cameras, mcp_servers, flow_webhook_secrets cascade`;
     await sql`insert into providers (name, base_url, api_key, extra_headers) values
       ('RotateP1', 'http://a', ${encryptSecretWithKey("key-one", oldKey)}, ${encryptSecretWithKey('{"X":"1"}', oldKey)}),
       ('RotateP2', 'http://b', null, null)`;

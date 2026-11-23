@@ -1,4 +1,4 @@
-﻿import { expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 /**
  * G7a end-to-end: create a chatflow in the editor, change its Reply template, publish it, run a
@@ -23,6 +23,8 @@ test("build, publish and test a chatflow", async ({ page }) => {
   await page.getByRole("button", { name: "New chatflow" }).first().click();
   await page.getByRole("textbox", { name: "Name" }).fill(`E2E greeter ${runId}`);
   await page.getByRole("button", { name: "Create chatflow" }).click();
+  // The create dialog stays up until the editor's server component resolves.
+  await expect(page).toHaveURL(/\/chatflows\/[^/]+$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: `E2E greeter ${runId}`, level: 1 })).toBeVisible();
 
   // The starter flow is Start -> Reply -> End; make the reply use the user's text.
@@ -56,4 +58,29 @@ test("build, publish and test a chatflow", async ({ page }) => {
 
   await page.getByRole("button", { name: "Highlight Reply step" }).click();
   await expect(page.locator('[data-node-type="reply"]')).toHaveClass(/ring-2/);
+});
+
+test("add a Client Action node and pick media for it", async ({ page }) => {
+  await page.goto("/chatflows");
+  await page.getByRole("button", { name: "New chatflow" }).first().click();
+  await page.getByRole("textbox", { name: "Name" }).fill(`E2E client action ${runId}`);
+  await page.getByRole("button", { name: "Create chatflow" }).click();
+  await expect(page).toHaveURL(/\/chatflows\/[^/]+$/, { timeout: 30_000 });
+  await expect(
+    page.getByRole("heading", { name: `E2E client action ${runId}`, level: 1 }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Add Client Action node" }).click();
+  const card = page.locator('[data-node-type="client_action"]');
+  await expect(card).toBeVisible();
+  await card.click({ position: { x: 12, y: 12 } });
+
+  await expect(page.getByLabel("Client tool")).toBeVisible();
+  const media = page.getByLabel("Media item");
+  await expect(media).toBeVisible();
+  await media.click();
+  await page.getByRole("option").first().click();
+  await expect(page.getByLabel("Arguments (JSON, templates allowed)")).toHaveValue(
+    /"media_id": "med_[a-f0-9]{12}"/,
+  );
 });

@@ -30,8 +30,8 @@ Client (Unity)                      Gateway                                    M
   run bookkeeping (`cursor`, `trace`, streamed `text`, usage).
 - The checkpointer (`@langchain/langgraph-checkpoint-postgres`) stores each run under
   `thread_id = session id`. Session memory is also stored in `session_memory`, so it survives a
-  process restart and is visible in the transcript viewer. Paused client-tool runs (G7b) will
-  resume from the same thread.
+  process restart and is visible in the transcript viewer. Paused client-tool runs resume from the
+  same thread when the client sends the tool results.
 - **Variables** (`vars`) are per-turn and start empty. **Memory** is per session and persists
   across turns. Templates can read both.
 - Session rules are unchanged: no `X-Session-Id` starts a session; a request with a different
@@ -43,21 +43,25 @@ Client (Unity)                      Gateway                                    M
 ## Nodes
 
 Every node has a **title** and an optional **comment** (the comment travels with the graph; the
-icon/popover UI is G7b). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`) also have an
-`error` output handle. Connect `error` to a recovery path; if it is left unconnected a failure
-ends the run as failed.
+icon/popover UI is G7b). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`, `Client Action`)
+also have an `error` output handle. Connect `error` to a recovery path; if it is left unconnected a
+failure ends the run as failed.
 
 | Node | What it does |
 |---|---|
 | Start | Entry point. Exposes the latest user message, history, session id and request info to templates. Exactly one per agent. |
-| LLM | Calls a model route (or `inherit`) with a system prompt template and a history choice (full / last N / none). Optionally offers allowed MCP tools and loops (max four rounds). Stores the answer in a variable; streams when it is terminal. |
+| LLM | Calls a model route (or `inherit`) with a system prompt template and a history choice (full / last N / none). Optionally offers allowed MCP tools and the client's Unity tools, looping (max four rounds) and pausing for client tool calls. Stores the answer in a variable; streams when it is terminal. |
 | Router | Branches on rules (`equals`, `contains`, `regex` on a template) or on an intent label picked by an LLM. One output handle per rule/label plus `default` and `error`. |
 | Set Variable | Assigns variables from templates. |
 | Webhook | Calls an HTTP endpoint with templated URL/body and encrypted headers, a timeout (default 10 s), 0–3 retries, a response size cap and JSON-path mappings into variables. |
 | Memory | `get`, `set`, `append` or `delete` a session memory key. |
 | MCP Tool | Calls one allowed tool on a registered MCP server with fixed or templated arguments. |
+| Client Action | Emits one fixed Unity tool call (media, camera, animation or a free-form name with a JSON args template) and pauses for the result. A result with `ok: false` takes the optional `error` handle. |
 | Reply | Streams templated text mid-flow. Several Replies stream in order. |
 | End | Ends the turn. |
+| Subflow Input | Declares the typed parameters (`string | number | boolean | json`) a caller passes. Exactly one per subflow. |
+| Subflow Output | Declares return values and a branch label. One handle per label appears on the caller. |
+| Call Subflow | Runs a pinned published subflow with templated inputs; each Subflow Output label is an output handle, plus an optional `error` handle. |
 
 ### Examples
 
@@ -134,6 +138,106 @@ Memory node: `operation: "append"`, `key: "history"`, `value: "{{input.text}}"` 
 newline-separated log across turns. MCP Tool node: pick the server and one allowed tool; each
 argument value is a template, and JSON-looking values are passed as JSON.
 
+## Subflows
+
+A **subflow** is a reusable flow with declared inputs and outputs. Agents and other subflows call
+it with a Call Subflow node. Subflows never appear in `/v1/agents` or `/v1/models`, and a chat
+request cannot name one as its agent (`400 invalid_agent`).
+
+- The flow kind is `subflow` (the flows table already stores it). Create one with **New subflow**
+  on the Chatflows page; the Agents / Subflows filter narrows the list.
+- A subflow has exactly one **Subflow Input** node and at least one **Subflow Output** node; every
+  path must reach an output. Start and End nodes are not used.
+- A Subflow Output has a **label** (the caller branch) and one or more **return values**. Each
+  return value is a template rendered inside the subflow.
+- A Call Subflow node picks a *published* subflow, maps its required parameters from caller
+  templates, and maps each output label to a caller variable. With one return value the variable
+  holds that value; with several it holds an object keyed by name.
+- The runtime executes the subflow as a nested LangGraph graph: its own `vars` (the mapped
+  inputs), the caller's session memory and conversation, and its Reply nodes stream straight to
+  the client.
+- A **client-tool pause inside a subflow pauses the whole run**: an LLM or Client Action node in
+  the subflow returns its `tool_calls` to the client, the parent pauses on the Call Subflow node,
+  and the next request's tool results resume the same child checkpoint and continue inside the
+  subflow before its output returns to the parent. This works across nested subflows and over both
+  Chat Completions and Responses.
+- The run trace nests the subflow steps under the Call Subflow step (`substeps`).
+
+### Pinning
+
+Publishing a flow records the **currently published version** of every subflow it calls in
+`flow_versions.pinned_subflows`. The parent always runs those pins, so publishing a new subflow
+version changes nothing until the parent is republished. The editor badges a Call Subflow node
+when its subflow has a newer published version ("Update v1 -> v2").
+
+### Validation and usage
+
+Publish-time checks add to the structural rules: the target must be published and be a subflow,
+every required input must be mapped, the configured output labels must match, call cycles are
+rejected (including cycles discovered through published versions) and nesting is limited to five
+levels. Deleting a subflow is blocked with `409 flow_in_use` while a published flow calls it; the
+subflow's Settings tab lists the callers and the versions they pin.
+
+### Example
+
+A subflow with one input, two branches and a return value:
+
+```json
+{
+  "nodes": [
+    { "id": "in", "type": "subflow_input", "position": { "x": 0, "y": 0 },
+      "data": { "title": "Input", "params": [{ "name": "topic", "type": "string", "required": true }] } },
+    { "id": "route", "type": "router", "position": { "x": 260, "y": 0 },
+      "data": { "title": "Known topic?", "mode": "rules",
+        "rules": [{ "id": "known", "label": "Known", "operator": "equals",
+                    "subject": "{{vars.topic}}", "value": "lobby" }],
+        "defaultLabel": "default" } },
+    { "id": "hit", "type": "subflow_output", "position": { "x": 520, "y": -80 },
+      "data": { "title": "Known", "label": "known",
+                "values": [{ "name": "summary", "value": "lobby: {{vars.topic}}" }] } },
+    { "id": "miss", "type": "subflow_output", "position": { "x": 520, "y": 80 },
+      "data": { "title": "Other", "label": "other",
+                "values": [{ "name": "summary", "value": "other: {{vars.topic}}" }] } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "in", "target": "route", "sourceHandle": "out" },
+    { "id": "e2", "source": "route", "target": "hit", "sourceHandle": "known" },
+    { "id": "e3", "source": "route", "target": "miss", "sourceHandle": "default" }
+  ]
+}
+```
+
+Caller node data (`out:known` and `out:other` are the source handles):
+
+```json
+{
+  "title": "Look up topic",
+  "subflowId": "agt_0123456789ab",
+  "subflowName": "Topic lookup",
+  "inputs": [{ "name": "topic", "value": "{{input.text}}" }],
+  "outputs": [
+    { "label": "known", "variable": "known_summary" },
+    { "label": "other", "variable": "other_summary" }
+  ]
+}
+```
+
+```mermaid
+flowchart LR
+    subgraph Caller
+      S[Start] --> C[Call Subflow<br/>pin v2]
+      C -- known --> R1[Reply]
+      C -- other --> R2[Reply]
+      C -. error .-> RE[Recovery]
+    end
+    subgraph Subflow v2
+      I[Subflow Input<br/>topic: string] --> RT{Router}
+      RT -- known --> O1[Subflow Output<br/>label known]
+      RT -- default --> O2[Subflow Output<br/>label other]
+    end
+    C ==>|runs pinned v2| I
+```
+
 ## Templates
 
 `{{input.text}}`, `{{vars.x}}`, `{{memory.x}}`, `{{nodes.<id>.output}}` interpolate dotted paths.
@@ -147,12 +251,88 @@ and prototypes are unreachable, and there is no way to run code. The editor sugg
 - `memory.<key>` — session memory at the start of the run
 - `nodes.<node id>.output` — the output of a node that already ran this turn
 
+## Unity (client) tools
+
+Unity sends its own function tools with each request (`tools` in Chat Completions, function tools
+in the Responses `input`). An LLM node chooses what to offer: **none**, **every** tool from the
+request, or a **subset by name** (Agent editor → the node's inspector). When the model calls one
+of them the gateway does not execute it: the run **pauses** and the client receives the call in
+the normal OpenAI shape — `tool_calls` with `finish_reason: "tool_calls"` for chat, a
+`function_call` output item for Responses (streamed or not). The next request in the same session
+that carries the results (`role: "tool"` messages, or `function_call_output` items) **resumes**
+the checkpointed run and continues from the paused node.
+
+- A pause uses a LangGraph `interrupt()`, so the graph state (messages, variables, memory,
+  position) is checkpointed under `thread_id = session id`.
+- **Mixed MCP and client calls** in one model reply: the gateway executes the MCP calls server-side
+  (as the plain-chat loop does), returns only the client calls, and injects the MCP results when
+  the run resumes.
+- A request that starts a new user message while the run is paused **abandons** the paused run and
+  starts a fresh one. Paused checkpoints are cleared when the session is purged.
+- LLM nodes that offer client tools do not stream their own text; the final text arrives with the
+  resumed turn. Pre-tool chatter stays out of the reply.
+- The per-agent restrictions below narrow the `media_id` / `camera_id` enums before the tools are
+  offered.
+
+```mermaid
+sequenceDiagram
+    participant C as Unity client
+    participant G as Gateway
+    participant L as LangGraph
+    participant U as Provider
+    C->>G: POST /v1/chat/completions { agent_id, tools, messages }
+    G->>L: invoke(thread_id = session id)
+    L->>U: chat (MCP + client tools offered)
+    U-->>L: tool_calls: show_image { media_id }
+    L-->>G: interrupt (checkpointed)
+    G-->>C: tool_calls response (finish_reason: tool_calls)
+    Note over C,G: The run is paused; it is not resumed automatically.
+    C->>G: POST /v1/chat/completions { messages + role: tool, tools }
+    G->>L: Command({ resume: tool results })
+    L->>U: chat with the tool result
+    U-->>L: final answer
+    L-->>G: run completes
+    G-->>C: streamed answer + X-Session-Id
+```
+
+### Client Action
+
+The **Client Action** node sends one tool call without a model. Pick a fixed tool — `show_image`
+or `show_video` (`media_id`), `show_camera` (`camera_id`), `play_animation` (`animation_id`) — or
+enter a free-form tool name. The arguments are a JSON object template, so
+`{"media_id":"{{vars.media}}"}` works. The node pauses exactly like an LLM client-tool call and
+stores the parsed result in its **output variable** (`client_result` by default). A result with
+`ok: false` follows the `error` handle; everything else follows `out`.
+
+### Restrictions
+
+The Agent **Settings** tab holds `allowed_media_tags` and `allowed_cameras` (stored in
+`flows.settings`). They are a filter, not a hard allowlist for every request:
+
+- The enums of forwarded `show_image` / `show_video` / `show_camera` tools are narrowed to the
+  media items carrying an allowed tag and to the allowed camera ids.
+- The Client Action media and camera pickers only list the allowed items.
+- Publishing rejects a Client Action whose literal `media_id` / `camera_id` is outside the allowed
+  sets.
+
+An empty list means "no restriction". These are per agent, so an agent can be limited to a subset
+of the media library and cameras.
+
+The restrictions belong to the **calling agent**, so they also apply to Client Action nodes inside
+a subflow that agent calls. A subflow is shareable and has its own settings, and publish-time
+validation of the subflow cannot know which agent will call it, so this is enforced at **run
+time**: the Client Action in the subflow is checked against the calling agent's resolved
+`media_id` / `camera_id` allow-lists and fails the run with `client_action_restricted` when it is
+outside them. The same resolved sets also narrow the client tools offered to an LLM node inside
+the subflow.
+
 ## Publishing and versions
 
 1. The editor autosaves the draft (last save wins; if another save happened after the copy you
    opened, the API reports a conflict warning but still saves).
-2. **Publish** validates the draft: schema-valid nodes, exactly one Start, every path reaches a
-   Reply/End, no orphan nodes, required fields set, and no cycles except edges marked as loops.
+2. **Publish** validates the draft: schema-valid nodes, exactly one Start (or one Subflow Input
+   for a subflow), every path reaches a Reply/End (or a Subflow Output), no orphan nodes, required
+   fields set, no cycles except edges marked as loops, and the subflow checks described above.
    Problems are returned per node and shown on the cards and in the publish dialog.
 3. Publishing stores the next immutable version with an optional note. Clients pick it up on
    their next request; in-flight sessions keep their agent version.
@@ -203,12 +383,40 @@ sequenceDiagram
 
 ## CRM
 
-- **Chatflows** lists agents with create, duplicate, enable/disable and delete.
-- The **editor** has a left palette (Flow / AI / Actions / Data), a dotted React Flow canvas
-  (zoom, minimap, snapping, auto-layout), a right inspector generated from the node schemas,
-  undo/redo, copy/paste, multi-select, a problems list and the autosave indicator.
+- **Chatflows** lists agents and subflows with an Agents / Subflows filter, create (agent or
+  subflow), duplicate, JSON import, enable/disable and delete.
+- The **editor** has a left palette (Flow / AI / Actions / Data / Notes) filtered by flow kind, a
+  dotted React Flow canvas (zoom, minimap, snapping, auto-layout, fit), a right inspector generated
+  from the node schemas, undo/redo, copy/paste, multi-select, a problems list and the autosave
+  indicator.
+- **Sticky notes** are canvas-only Markdown nodes (raw HTML is escaped, never rendered). They are
+  resizable, edited by double-clicking, use theme-token colours (yellow, blue, green, pink, grey),
+  layer with Bring forward / Send backward, and are versioned and exported. The validator and the
+  compiler ignore them.
+- **Node comments**: every node keeps a comment plus `commentUpdatedAt`. Commented nodes show a
+  speech-bubble badge with a popover (text and last-edited time); edit the text in the inspector.
+- **Visual groups**: select nodes and press `Ctrl+G` (or the toolbar Group button) to wrap them in
+  a titled frame. A group moves as one, can be collapsed to a single box, and can be ungrouped
+  with the toolbar or `Ctrl+Shift+G`. Groups are purely cosmetic: the compiler and validator
+  flatten their children and ignore the frame.
+- **Convert group to subflow** (group menu) extracts the group's executable children into a new
+  subflow draft: edges entering the group become Subflow Input parameters, each distinct exit
+  becomes a Subflow Output label, and the group is replaced in the parent by a Call Subflow node
+  wired to the same neighbours. The new draft opens in a new tab. Conversion refuses a group that
+  contains a Start node, has no executable children, or has no inbound/outbound edges.
+- The toolbar eye toggles all sticky notes and comment badges. **Version history** can compare a
+  version with the draft: added, removed and changed nodes (and edges) are highlighted on the
+  canvas with a legend and a summary list; it is view only.
+- **JSON export** writes the draft or a version without secrets (webhook headers keep their names
+  only). **JSON import** creates a new flow, runs the same validation as publish, and lists the
+  webhook headers that need re-linking.
+- Duplicating a chatflow copies the draft (including notes and groups), its settings and its
+  webhook header secrets; the copy starts disabled and unpublished.
 - The **test drawer** runs the saved draft and shows a live trace; clicking a step highlights
   its node and running nodes light up while the run is in progress.
+- **Keyboard shortcuts** (ignored while typing in an input): `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z`
+  or `Ctrl/Cmd+Y` redo, `Ctrl/Cmd+C`/`V` copy and paste, `Ctrl/Cmd+G` group,
+  `Ctrl/Cmd+Shift+G` ungroup, `N` add a sticky note, `Delete`/`Backspace` delete the selection.
 - **Settings** holds the agent name, slug, description, enabled flag and default model route.
 - The **transcript viewer** shows the session's run traces and memory next to the conversation.
 
@@ -223,4 +431,7 @@ sequenceDiagram
 | Webhook error on a correct URL | Check the timeout, the response size cap, the retry count and any 4xx. Non-2xx answers take the `error` handle. |
 | Template shows an empty value | The path does not exist yet, or `nodes.<id>.output` refers to a node that has not run on this path. Unknown references are underlined in the editor. |
 | Memory is not visible next turn | Memory is session-scoped: reuse the `X-Session-Id`. Test-drawer runs use an isolated store. |
-| The canvas looks tiny | Use the fit/minimap controls or the auto-layout button. New flows start with a compact Start → Reply → End skeleton. |
+| `subflow_not_pinned` at run time | The published agent predates the Call Subflow node; republish the caller to capture the pins. |
+| Call Subflow publish problem | The target is unpublished, is an agent, misses a required input, has output labels that do not match, or the call would cycle / nest too deep. |
+| `409 flow_in_use` when deleting | A published flow still calls the subflow. Republish or delete that caller, or open the subflow's Settings tab to see the usage list. |
+| The canvas looks tiny | Use the Fit button or the minimap, or auto-layout. The canvas keeps a 0.6× minimum zoom so cards stay readable with the test drawer open. New flows start with a compact Start → Reply → End skeleton. |

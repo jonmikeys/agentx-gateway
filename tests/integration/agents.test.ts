@@ -7,6 +7,7 @@ import { closeDatabase, getDb } from "@/server/db/client";
 import { runLogs, sessionMemory, sessions } from "@/server/db/schema";
 import {
   createFlow,
+  duplicateFlow,
   getFlow,
   listPublishedAgents,
   publishFlow,
@@ -582,5 +583,54 @@ describe("agents: chatflow runtime and client API", () => {
     expect(
       await getDb().select().from(sessionMemory).where(eq(sessionMemory.sessionId, sessionId)),
     ).toHaveLength(0);
+  });
+
+  it("duplicates the draft, settings and sticky notes", async () => {
+    const start = node("start");
+    const reply = node("reply", { template: "hi" });
+    const end = node("end");
+    const note: FlowNode = {
+      id: "note_duplicate",
+      type: "note",
+      position: { x: 0, y: 200 },
+      width: 240,
+      height: 160,
+      data: { title: "Remember", markdown: "note body", color: "pink" },
+    } as FlowNode;
+    const flow = await createFlow({
+      name: `Duplicate ${counter}`,
+      slug: `duplicate-${counter}-${Date.now().toString(36)}`,
+      kind: "agent",
+      description: "copy me",
+      enabled: true,
+      settings: {
+        default_route_slug: routeSlug,
+        allowed_media_tags: ["framed"],
+        allowed_cameras: ["lobby"],
+      },
+    });
+    counter += 1;
+    await saveDraft(
+      flow.id,
+      graph(
+        [start, reply, end, note],
+        [
+          [start.id, reply.id],
+          [reply.id, end.id],
+        ],
+      ),
+    );
+
+    const copy = await duplicateFlow(flow.id);
+    expect(copy.draft.nodes.some((entry) => entry.type === "note")).toBe(true);
+    expect(copy.draft.nodes.find((entry) => entry.type === "note")?.data).toMatchObject({
+      title: "Remember",
+      color: "pink",
+    });
+    expect(copy.settings.default_route_slug).toBe(routeSlug);
+    expect(copy.settings.allowed_media_tags).toEqual(["framed"]);
+    expect(copy.settings.allowed_cameras).toEqual(["lobby"]);
+    expect(copy.enabled).toBe(false);
+    expect(copy.published_version).toBeNull();
   });
 });

@@ -198,7 +198,8 @@ export function normalizeResponsesInput(body: Json): ChatMessage[] {
   return messages;
 }
 
-function convertTools(tools: unknown): unknown[] | undefined {
+/** Responses function tools -> chat function tools (also used for agent client tools). */
+export function convertTools(tools: unknown): unknown[] | undefined {
   if (tools === undefined || tools === null) return undefined;
   if (!Array.isArray(tools)) {
     throw new TranslationError("invalid_request", "tools must be an array.");

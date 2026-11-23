@@ -23,6 +23,14 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-chatflow-publish-light.png](state-chatflow-publish-light.png) | Chatflow editor: publish dialog with validation results and a version note (light theme) |
 | ![state-chatflow-versions-light.png](state-chatflow-versions-light.png) | Chatflow editor: version history with a published version preview and restore (light theme) |
 | ![state-chatflow-test-trace-light.png](state-chatflow-test-trace-light.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (light theme) |
+| ![state-chatflow-client-action-light.png](state-chatflow-client-action-light.png) | Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template) (light theme) |
+| ![state-chatflow-notes-group-light.png](state-chatflow-notes-group-light.png) | Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed (light theme) |
+| ![state-chatflow-comment-light.png](state-chatflow-comment-light.png) | Chatflow editor: the node comment popover with the last-edited time (light theme) |
+| ![state-chatflow-subflow-light.png](state-chatflow-subflow-light.png) | Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output (light theme) |
+| ![state-chatflow-call-subflow-light.png](state-chatflow-call-subflow-light.png) | Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published (light theme) |
+| ![state-chatflow-version-compare-light.png](state-chatflow-version-compare-light.png) | Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft (light theme) |
+| ![state-chatflow-import-light.png](state-chatflow-import-light.png) | Chatflows: the JSON import dialog listing the webhook headers that must be re-linked (light theme) |
+| ![state-chatflow-paused-trace-light.png](state-chatflow-paused-trace-light.png) | Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result (light theme) |
 | ![state-session-agent-run-light.png](state-session-agent-run-light.png) | Session transcript: an agent turn with its per-node run trace and session memory (light theme) |
 | ![state-api-key-created-light.png](state-api-key-created-light.png) | API Keys: the full key is shown exactly once, with a copy button (light theme) |
 | ![state-session-detail-light.png](state-session-detail-light.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (light theme) |
@@ -60,6 +68,14 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-chatflow-publish-dark.png](state-chatflow-publish-dark.png) | Chatflow editor: publish dialog with validation results and a version note (dark theme) |
 | ![state-chatflow-versions-dark.png](state-chatflow-versions-dark.png) | Chatflow editor: version history with a published version preview and restore (dark theme) |
 | ![state-chatflow-test-trace-dark.png](state-chatflow-test-trace-dark.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (dark theme) |
+| ![state-chatflow-client-action-dark.png](state-chatflow-client-action-dark.png) | Chatflow editor: a Client Action node with its inspector (tool, media picker and JSON arguments template) (dark theme) |
+| ![state-chatflow-notes-group-dark.png](state-chatflow-notes-group-dark.png) | Chatflow editor: a sticky note and a visual group frame, both canvas-only and never executed (dark theme) |
+| ![state-chatflow-comment-dark.png](state-chatflow-comment-dark.png) | Chatflow editor: the node comment popover with the last-edited time (dark theme) |
+| ![state-chatflow-subflow-dark.png](state-chatflow-subflow-dark.png) | Subflow editor: Subflow Input parameters, the flow body and a labelled Subflow Output (dark theme) |
+| ![state-chatflow-call-subflow-dark.png](state-chatflow-call-subflow-dark.png) | Chatflow editor: a Call Subflow node pinned to v1 with the "Update available" badge after v2 was published (dark theme) |
+| ![state-chatflow-version-compare-dark.png](state-chatflow-version-compare-dark.png) | Chatflow editor: version compare highlighting added and changed nodes between a published version and the draft (dark theme) |
+| ![state-chatflow-import-dark.png](state-chatflow-import-dark.png) | Chatflows: the JSON import dialog listing the webhook headers that must be re-linked (dark theme) |
+| ![state-chatflow-paused-trace-dark.png](state-chatflow-paused-trace-dark.png) | Chatflow editor: a test run paused on a Client Action, waiting for the client to return the tool result (dark theme) |
 | ![state-session-agent-run-dark.png](state-session-agent-run-dark.png) | Session transcript: an agent turn with its per-node run trace and session memory (dark theme) |
 | ![state-api-key-created-dark.png](state-api-key-created-dark.png) | API Keys: the full key is shown exactly once, with a copy button (dark theme) |
 | ![state-session-detail-dark.png](state-session-detail-dark.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (dark theme) |

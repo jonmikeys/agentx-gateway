@@ -25,9 +25,14 @@ async function checkpointsExist(): Promise<boolean> {
 
 async function deleteCheckpoints(ids: string[]): Promise<void> {
   if (!(await checkpointsExist())) return;
-  await getDb().execute(sql`delete from checkpoint_writes where thread_id = any(${ids})`);
-  await getDb().execute(sql`delete from checkpoint_blobs where thread_id = any(${ids})`);
-  await getDb().execute(sql`delete from checkpoints where thread_id = any(${ids})`);
+  // A parameter list keeps Postgres from having to infer an array type for `any($1)`.
+  const list = sql.join(
+    ids.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  await getDb().execute(sql`delete from checkpoint_writes where thread_id in (${list})`);
+  await getDb().execute(sql`delete from checkpoint_blobs where thread_id in (${list})`);
+  await getDb().execute(sql`delete from checkpoints where thread_id in (${list})`);
 }
 
 export function registerAgentPurgeHooks(): void {

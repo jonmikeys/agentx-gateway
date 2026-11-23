@@ -50,6 +50,13 @@
       "when": 1795414166197,
       "tag": "0006_lean_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795423988762,
+      "tag": "0007_sturdy_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,14 @@ AGENTX Gateway: a self-hostable, OpenAI-compatible API gateway and admin CRM. Ne
 - `pnpm build`. Do not read the environment at import time: validate lazily (`getEnv()`) so `next build` works without secrets.
 - CI (`.github/workflows/ci.yml`) runs all of the above plus Playwright and a Docker build.
 
+## Running the app for e2e (agents, read this)
+
+- Never start the app with `Start-Process`, `cmd /c start`, `&` or a backgrounded `pnpm start`. On Windows the server stays attached to the shell, and the tool call never returns.
+- After `pnpm build`, run e2e in one shot. This starts the app hidden in the background, runs Playwright, and always stops the app:
+  `pnpm e2e:run -- -Port <appPort> -MockPort <mockUpstreamPort> [-Specs e2e/foo.spec.ts,e2e/bar.spec.ts] [-Grep "<title>"]`
+- When you need the server for something else (for example screenshots), use `pnpm e2e:serve -- -Port <port>`. It returns once the port is listening; the log is `.e2e/server-<port>.log`. Stop it with `pnpm e2e:stop -- -Port <port>`.
+- Gate scope for parallel work: a slice branch runs lint, typecheck, unit, the integration files for its area, and `e2e:run -Specs` for its area. The full suite (all integration, all e2e, screenshots) runs once, on the integration branch, before the PR.
+
 ## Configuration and secrets
 
 - Every environment variable is validated in `src/server/env.ts` (Zod) and listed with a comment in `.env.example`. Keep both in sync, with empty values in the example. Never print secret values in logs or errors; report variable names only.

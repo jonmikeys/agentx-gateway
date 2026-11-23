@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { type ClientToolDefinition, normalizeClientTools } from "@/lib/agents/client-tools";
 import { chatCompletionRequestSchema, responsesRequestSchema } from "@/lib/gateway-schemas";
 import { type RunAgentResult, runAgent } from "@/server/agents/runtime";
 import { openAIError } from "@/server/api/errors";
@@ -13,6 +14,7 @@ import {
 import {
   buildChatRequest,
   type ChatMessage,
+  convertTools,
   normalizeResponsesInput,
   TranslationError,
 } from "@/server/gateway/responses/request-translate";
@@ -20,11 +22,15 @@ import { chatCompletionToResponse } from "@/server/gateway/responses/response-tr
 import { ChatToResponsesStream } from "@/server/gateway/responses/stream-translate";
 import { formatSse, formatSseEvent, SSE_DONE } from "@/server/gateway/sse";
 import { contentToText } from "@/server/gateway/transcript/diff";
-import type { CapturedResponse } from "@/server/gateway/transcript/response-capture";
+import type {
+  CapturedResponse,
+  CapturedToolCall,
+} from "@/server/gateway/transcript/response-capture";
 import { logger } from "@/server/logger";
 import {
   listPublishedAgents,
   type ResolvedAgent,
+  resolveAgentRestrictions,
   resolvePublishedAgent,
 } from "@/server/services/agents";
 import { recordLlmRequest } from "@/server/services/llm-requests";
@@ -75,6 +81,8 @@ interface PreparedRequest {
   /** Messages in chat format, used for transcript capture. */
   messages: unknown[];
   stream: boolean;
+  /** Function tools the Unity client sent (offered by agent LLM nodes that select them). */
+  clientTools: ClientToolDefinition[];
 }
 
 async function resolveRequestedRoute(
@@ -211,15 +219,15 @@ async function persistAgentRun(input: {
   const captured: CapturedResponse = {
     text: input.result.reply,
     reasoning: input.result.reasoning,
-    toolCalls: [],
+    toolCalls: input.result.toolCalls ?? [],
   };
   const outcome: RequestOutcome = {
     routeSlug: input.routeSlug,
     clientApi: input.clientApi,
     upstreamApi: "chat",
     stream: input.prepared.stream,
-    status: input.result.status,
-    httpStatus: input.result.status === "ok" ? 200 : 502,
+    status: input.result.status === "error" ? "error" : "ok",
+    httpStatus: input.result.status === "error" ? 502 : 200,
     errorCode: input.result.status === "error" ? "agent_run_failed" : undefined,
     errorMessage: input.result.error,
     startedAt: input.startedAt,
@@ -241,7 +249,7 @@ async function persistAgentRun(input: {
       flowId: input.result.trace.flow_id,
       version: input.result.trace.version,
       trace: input.result.trace,
-      status: input.result.status,
+      status: input.result.status === "error" ? "error" : "ok",
       startedAt: input.startedAt,
       durationMs: input.durationMs,
     });
@@ -262,6 +270,38 @@ function chatDeltaFrame(id: string, model: string, content: string): string {
       created: Math.floor(Date.now() / 1000),
       model,
       choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    }),
+  );
+}
+
+function chatToolCallFrame(
+  id: string,
+  model: string,
+  call: CapturedToolCall,
+  index: number,
+): string {
+  return formatSse(
+    JSON.stringify({
+      id,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index,
+                id: call.id ?? `call_${index}`,
+                type: "function",
+                function: { name: call.name ?? "", arguments: call.rawArguments || "{}" },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
     }),
   );
 }
@@ -296,6 +336,7 @@ async function runAgentRequest(
   const apiKey = c.get("apiKey");
   const route = await resolveAgentRoute(agent, prepared.body);
   const routeSlug = route?.slug ?? "agent";
+  const restrictions = await resolveAgentRestrictions(agent.flow.settings);
 
   // The existing hook ends a session that started with another agent (or none) and starts a new one.
   const session = await resolveSession({
@@ -319,11 +360,14 @@ async function runAgentRequest(
       flowId: agent.flow.id,
       version: agent.version,
       graph: agent.graph,
+      pinnedSubflows: agent.pinnedSubflows,
       sessionId: session.sessionId,
       messages: prepared.messages,
       inputText,
       route,
       signal: c.req.raw.signal,
+      clientTools: prepared.clientTools,
+      clientRestrictions: restrictions,
     });
     await persistAgentRun({
       clientApi,
@@ -346,27 +390,19 @@ async function runAgentRequest(
       );
     }
     const usage = result.usage;
+    const captured: CapturedResponse = {
+      text: result.reply,
+      reasoning: result.reasoning,
+      toolCalls: result.toolCalls ?? [],
+    };
     if (clientApi === "chat") {
-      return new Response(
-        JSON.stringify(
-          syntheticCompletion(
-            { text: result.reply, reasoning: result.reasoning, toolCalls: [] },
-            modelLabel,
-            usage,
-          ),
-        ),
-        {
-          status: 200,
-          headers: { ...headers, "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify(syntheticCompletion(captured, modelLabel, usage)), {
+        status: 200,
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
     }
     const { response } = chatCompletionToResponse(
-      syntheticCompletion(
-        { text: result.reply, reasoning: result.reasoning, toolCalls: [] },
-        modelLabel,
-        usage,
-      ),
+      syntheticCompletion(captured, modelLabel, usage),
       modelLabel,
       usage,
     );
@@ -403,6 +439,10 @@ async function runAgentRequest(
           ),
         );
       }
+      const pausedCalls = result.status === "paused" ? (result.toolCalls ?? []) : [];
+      pausedCalls.forEach((call, index) => {
+        write(chatToolCallFrame(completionId, modelLabel, call, index));
+      });
       write(
         formatSse(
           JSON.stringify({
@@ -410,7 +450,13 @@ async function runAgentRequest(
             object: "chat.completion.chunk",
             created: Math.floor(Date.now() / 1000),
             model: modelLabel,
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: pausedCalls.length > 0 ? "tool_calls" : "stop",
+              },
+            ],
           }),
         ),
       );
@@ -425,6 +471,28 @@ async function runAgentRequest(
           write(formatSseEvent(event.type, JSON.stringify(event.data)));
         }
       } else {
+        if (result.status === "paused") {
+          (result.toolCalls ?? []).forEach((call, index) => {
+            for (const event of translator?.push({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index,
+                        id: call.id ?? `call_${index}`,
+                        type: "function",
+                        function: { name: call.name ?? "", arguments: call.rawArguments || "{}" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }) ?? []) {
+              write(formatSseEvent(event.type, JSON.stringify(event.data)));
+            }
+          });
+        }
         if (result.usage) {
           for (const event of translator.push({ choices: [], usage: result.usage })) {
             write(formatSseEvent(event.type, JSON.stringify(event.data)));
@@ -466,11 +534,14 @@ async function runAgentRequest(
     flowId: agent.flow.id,
     version: agent.version,
     graph: agent.graph,
+    pinnedSubflows: agent.pinnedSubflows,
     sessionId: session.sessionId,
     messages: prepared.messages,
     inputText,
     route,
     signal: c.req.raw.signal,
+    clientTools: prepared.clientTools,
+    clientRestrictions: restrictions,
     onEvent: (event) => {
       if (event.type !== "text" || !event.delta) return;
       if (translator) {
@@ -575,6 +646,7 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
       body,
       messages: parsed.data.messages,
       stream: parsed.data.stream === true,
+      clientTools: normalizeClientTools(raw.tools),
     };
     if (agentId) return runAgentRequest(c, "chat", prepared, agentId);
 
@@ -618,10 +690,19 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
     }
 
     if (agentId) {
+      let clientTools: ClientToolDefinition[] = [];
+      try {
+        clientTools = normalizeClientTools(convertTools(body.tools) ?? []);
+      } catch (error) {
+        if (error instanceof TranslationError) {
+          return openAIError(400, error.code, error.message);
+        }
+        throw error;
+      }
       return runAgentRequest(
         c,
         "responses",
-        { body, messages, stream: parsed.data.stream === true },
+        { body, messages, stream: parsed.data.stream === true, clientTools },
         agentId,
       );
     }
@@ -649,6 +730,7 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
       chatBody,
       messages,
       stream: parsed.data.stream === true,
+      clientTools: [],
     });
   });
 }

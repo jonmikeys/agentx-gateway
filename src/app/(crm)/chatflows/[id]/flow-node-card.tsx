@@ -4,12 +4,15 @@ import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
   CircleAlert,
   Database,
+  Frame,
   GitBranch,
   type LucideIcon,
   MessageSquare,
+  MonitorPlay,
   Play,
   Sparkles,
   Square,
+  StickyNote,
   Variable,
   Webhook,
   Wrench,
@@ -17,6 +20,8 @@ import {
 import { useEditorUi } from "@/app/(crm)/chatflows/[id]/editor-context";
 import type { EditorNode } from "@/app/(crm)/chatflows/[id]/flow-editor-utils";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatTimestamp } from "@/lib/admin-client";
 import { type FlowNode, type NodeType, nodeHandles, summarizeNode } from "@/lib/agents/graph";
 import { cn } from "@/lib/utils";
 
@@ -28,19 +33,28 @@ const icons: Record<NodeType, LucideIcon> = {
   webhook: Webhook,
   memory: Database,
   mcp_tool: Wrench,
+  client_action: MonitorPlay,
   reply: MessageSquare,
   end: Square,
+  subflow_input: Play,
+  subflow_output: Square,
+  call_subflow: GitBranch,
+  note: StickyNote,
+  group: Frame,
 };
 
 /** Custom React Flow card: icon, editable title, summary, dynamic Router handles, error handles. */
 export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>) {
-  const { problems, runningNodeId, traceNodeId, onRename } = useEditorUi();
+  const { problems, runningNodeId, traceNodeId, nodeBadges, onRename, hideAnnotations, diff } =
+    useEditorUi();
+  const badge = nodeBadges?.get(id);
   const Icon = icons[(type ?? "start") as NodeType];
   const node = { id, type, position: { x: 0, y: 0 }, data } as FlowNode;
   const handles = nodeHandles(node);
   const nodeProblems = problems.get(id) ?? [];
   const running = runningNodeId === id;
   const traced = traceNodeId === id;
+  const diffStatus = diff?.nodes.get(id);
   const nonErrorHandles = handles.filter((handle) => handle.kind !== "error");
   const errorHandle = handles.find((handle) => handle.kind === "error");
 
@@ -53,10 +67,13 @@ export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>
         selected && "ring-2 ring-ring",
         running && "ring-2 ring-primary",
         traced && !running && "ring-2 ring-foreground/60",
+        diffStatus === "added" && "ring-2 ring-chart-5",
+        diffStatus === "changed" && "ring-2 ring-chart-2",
+        diffStatus === "removed" && "ring-2 ring-destructive",
         nodeProblems.length > 0 && "border-destructive/60",
       )}
     >
-      {type !== "start" && (
+      {type !== "start" && type !== "subflow_input" && (
         <Handle
           type="target"
           position={Position.Left}
@@ -94,10 +111,42 @@ export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>
         <Badge variant="outline" className="whitespace-nowrap text-[10px]">
           {type}
         </Badge>
-        {data.comment && (
-          <span role="img" title={data.comment} aria-label="Node has a comment">
-            <MessageSquare className="size-3.5 text-muted-foreground" />
-          </span>
+        {data.comment && !hideAnnotations && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="Show comment"
+                aria-label="Show comment"
+                className="nodrag rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus:bg-accent focus:outline-none"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <MessageSquare className="size-3.5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              aria-label="Node comment"
+              className="w-64 text-xs"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <p className="break-words whitespace-pre-wrap">{data.comment}</p>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                {data.commentUpdatedAt
+                  ? `Last edited ${formatTimestamp(data.commentUpdatedAt)}`
+                  : "Last edited unknown"}
+              </p>
+            </PopoverContent>
+          </Popover>
+        )}
+        {badge && (
+          <Badge
+            variant="secondary"
+            className="whitespace-nowrap text-[10px]"
+            data-testid="node-badge"
+          >
+            {badge}
+          </Badge>
         )}
         {running && (
           <span className="ml-auto text-[10px] font-medium text-primary" data-testid="node-running">

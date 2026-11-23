@@ -17,6 +17,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // Every worker shares one `next start` process. Too many parallel workers make server-rendered
+  // pages slow enough to trip the default 5 s expect timeout, so cap them instead of raising timeouts.
+  workers: process.env.CI ? 2 : 3,
   use: { baseURL, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

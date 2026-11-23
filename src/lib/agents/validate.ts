@@ -1,7 +1,16 @@
 import {
+  ANIMATION_TOOL_NAMES,
+  CAMERA_TOOL_NAMES,
+  type ClientToolRestrictions,
+  clientActionProblem,
+  MEDIA_TOOL_NAMES,
+} from "@/lib/agents/client-tools";
+import {
   type FlowGraph,
+  type FlowKind,
   type FlowNode,
   flowNodeSchema,
+  isExecutableNode,
   type NodeType,
   nodeHandles,
 } from "@/lib/agents/graph";
@@ -18,7 +27,18 @@ export interface ValidationResult {
   problems: ValidationProblem[];
 }
 
-const TERMINAL_TYPES: readonly NodeType[] = ["reply", "end"];
+/** Resolved agent allow-lists used to validate Client Action references. */
+export type ValidationRestrictions = ClientToolRestrictions;
+
+export interface ValidationOptions {
+  /** Defaults to `agent` so existing callers keep their behaviour. */
+  kind?: FlowKind;
+  /** The resolved allow-lists of the calling agent, when validating at publish time. */
+  restrictions?: ValidationRestrictions;
+}
+
+const AGENT_TERMINAL_TYPES: readonly NodeType[] = ["reply", "end"];
+const SUBFLOW_TERMINAL_TYPES: readonly NodeType[] = ["subflow_output"];
 
 function titleOf(node: FlowNode | undefined, fallback: string): string {
   return node?.data.title ?? fallback;
@@ -59,7 +79,10 @@ function buildAdjacency(graph: FlowGraph): Adjacency {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
     const source = byId.get(edge.source);
-    if (!source) continue;
+    const target = byId.get(edge.target);
+    if (!source || !target) continue;
+    // Notes and groups are purely visual: their edges never take part in validation.
+    if (!isExecutableNode(source) || !isExecutableNode(target)) continue;
     const list = outgoing.get(edge.source) ?? [];
     list.push({
       handle: handleOf(edge, source),
@@ -72,7 +95,66 @@ function buildAdjacency(graph: FlowGraph): Adjacency {
   return { outgoing, incoming };
 }
 
-function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationProblem[] {
+/** Subflow-only structural rules: one input, at least one uniquely labelled output. */
+function subflowProblems(graph: FlowGraph): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  for (const node of graph.nodes) {
+    if (node.type === "start" || node.type === "end") {
+      problems.push({
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        message: "Subflows use Subflow Input and Subflow Output instead of Start and End",
+      });
+    }
+  }
+  const inputs = graph.nodes.filter((node) => node.type === "subflow_input");
+  if (inputs.length !== 1) {
+    problems.push({
+      message:
+        inputs.length === 0
+          ? "Add exactly one Subflow Input node"
+          : "A subflow must have exactly one Subflow Input node",
+    });
+  }
+  const outputs = graph.nodes.filter((node) => node.type === "subflow_output");
+  if (outputs.length === 0) {
+    problems.push({ message: "Add at least one Subflow Output node" });
+  }
+  const labels = outputs.map((node) => (node.type === "subflow_output" ? node.data.label : ""));
+  if (new Set(labels).size !== labels.length) {
+    problems.push({ message: "Subflow Output labels must be unique" });
+  }
+  return problems;
+}
+
+function callSubflowProblems(graph: FlowGraph): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  for (const node of graph.nodes) {
+    if (node.type !== "call_subflow") continue;
+    if (node.data.outputs.length === 0) {
+      problems.push({
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        message: "Add at least one output label",
+      });
+    }
+    const labels = node.data.outputs.map((output) => output.label);
+    if (new Set(labels).size !== labels.length) {
+      problems.push({
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        message: "Output labels must be unique",
+      });
+    }
+  }
+  return problems;
+}
+
+function structuralProblems(
+  graph: FlowGraph,
+  adjacency: Adjacency,
+  kind: FlowKind,
+): ValidationProblem[] {
   const problems: ValidationProblem[] = [];
   const byId = new Map<string, FlowNode>();
   for (const node of graph.nodes) {
@@ -91,8 +173,17 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
     }
   }
 
-  const starts = graph.nodes.filter((node) => node.type === "start");
-  if (starts.length !== 1) {
+  if (kind === "subflow") problems.push(...subflowProblems(graph));
+  problems.push(...callSubflowProblems(graph));
+
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
+  const starts = runtimeNodes.filter((node) => node.type === "start");
+  const inputs = runtimeNodes.filter((node) => node.type === "subflow_input");
+  if (kind === "subflow") {
+    if (starts.length > 0) {
+      // Already reported by subflowProblems; avoid a duplicate "one Start" message.
+    }
+  } else if (starts.length !== 1) {
     problems.push({
       message:
         starts.length === 0
@@ -100,12 +191,12 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
           : "An agent must have exactly one Start node",
     });
   }
-  const start = starts[0];
+  const root = kind === "subflow" ? inputs[0] : starts[0];
 
-  if (start) {
+  if (root) {
     // Every non-error output must lead somewhere, and every node must be reachable.
     const reachable = new Set<string>();
-    const queue: string[] = [start.id];
+    const queue: string[] = [root.id];
     while (queue.length > 0) {
       const id = queue.shift() as string;
       if (reachable.has(id)) continue;
@@ -115,18 +206,21 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
       }
     }
 
-    for (const node of graph.nodes) {
-      if (node === start) continue;
+    for (const node of runtimeNodes) {
+      if (node === root) continue;
       if (!reachable.has(node.id)) {
         problems.push({
           nodeId: node.id,
           nodeTitle: node.data.title,
-          message: "Node is not reachable from Start",
+          message:
+            kind === "subflow"
+              ? "Node is not reachable from Subflow Input"
+              : "Node is not reachable from Start",
         });
       }
     }
 
-    for (const node of graph.nodes) {
+    for (const node of runtimeNodes) {
       if (!reachable.has(node.id)) continue;
       const handles = nodeHandles(node);
       for (const handle of handles) {
@@ -145,6 +239,14 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
           });
         }
       }
+    }
+
+    const terminalTypes = kind === "subflow" ? SUBFLOW_TERMINAL_TYPES : AGENT_TERMINAL_TYPES;
+    const terminals = runtimeNodes.filter(
+      (node) => reachable.has(node.id) && terminalTypes.includes(node.type),
+    );
+    if (kind === "subflow" && terminals.length === 0) {
+      problems.push({ message: "Every path must reach a Subflow Output" });
     }
   }
 
@@ -171,18 +273,76 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
     visiting.delete(id);
     visited.add(id);
   };
-  for (const node of graph.nodes) visit(node.id);
+  for (const node of runtimeNodes) visit(node.id);
 
   return problems;
 }
 
+function restrictionProblems(
+  graph: FlowGraph,
+  restrictions: ValidationRestrictions | undefined,
+): ValidationProblem[] {
+  const problems: ValidationProblem[] = [];
+  for (const node of graph.nodes) {
+    if (node.type !== "client_action") continue;
+    const title = node.data.title;
+    let args: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(node.data.argsTemplate.trim() || "{}") as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        problems.push({
+          nodeId: node.id,
+          nodeTitle: title,
+          message: "Arguments must be a JSON object",
+        });
+        continue;
+      }
+      args = parsed as Record<string, unknown>;
+    } catch {
+      // Templates are interpolated at run time; only literal JSON can be checked here.
+      continue;
+    }
+    const required = MEDIA_TOOL_NAMES.has(node.data.toolName)
+      ? "media_id"
+      : CAMERA_TOOL_NAMES.has(node.data.toolName)
+        ? "camera_id"
+        : ANIMATION_TOOL_NAMES.has(node.data.toolName)
+          ? "animation_id"
+          : undefined;
+    if (required && (typeof args[required] !== "string" || args[required] === "")) {
+      problems.push({
+        nodeId: node.id,
+        nodeTitle: title,
+        message: `Choose a ${required.replace("_id", "")} for this Client Action`,
+      });
+      continue;
+    }
+    const problem = clientActionProblem(
+      node.data.toolName,
+      args,
+      restrictions ?? {
+        mediaIds: null,
+        cameraIds: null,
+      },
+    );
+    if (problem) problems.push({ nodeId: node.id, nodeTitle: title, message: problem });
+  }
+  return problems;
+}
+
 /**
- * Publish-time validation (spec §13): schema-valid nodes, exactly one Start, every path reaches a
- * Reply or End, no orphans, no cycles except edges marked `loop`. Returns per-node problems so the
- * CRM can badge the offending cards.
+ * Publish-time validation (spec §13): schema-valid nodes, exactly one Start (agents) or one
+ * Subflow Input (subflows), every path reaches Reply/End or a Subflow Output, no orphans, no
+ * cycles except edges marked `loop`. Returns per-node problems so the CRM can badge the cards.
+ * Call Subflow cross-flow checks live in `checkSubflowReferences` (they need published targets).
  */
-export function validateGraph(graph: FlowGraph): ValidationResult {
-  const problems = [...schemaProblems(graph), ...structuralProblems(graph, buildAdjacency(graph))];
+export function validateGraph(graph: FlowGraph, options: ValidationOptions = {}): ValidationResult {
+  const kind = options.kind ?? "agent";
+  const problems = [
+    ...schemaProblems(graph),
+    ...structuralProblems(graph, buildAdjacency(graph), kind),
+    ...restrictionProblems(graph, options.restrictions),
+  ];
   return { valid: problems.length === 0, problems };
 }
 
@@ -198,5 +358,5 @@ export function problemsByNode(result: ValidationResult): Map<string, Validation
 
 /** Nodes whose output may be terminal (used by the compiler to decide streaming). */
 export function isTerminalNodeType(type: NodeType): boolean {
-  return TERMINAL_TYPES.includes(type);
+  return [...AGENT_TERMINAL_TYPES, ...SUBFLOW_TERMINAL_TYPES].includes(type);
 }
