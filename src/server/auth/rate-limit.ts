@@ -49,15 +49,32 @@ export class FailedLoginLimiter {
     if (recent.length >= this.maxFailures) {
       this.blockedUntil.set(ip, now + this.blockMs);
     }
+    this.maybePrune(now);
+  }
+
+  /** Number of addresses with retained state (diagnostics and tests). */
+  get trackedIps(): number {
+    return new Set([...this.failures.keys(), ...this.blockedUntil.keys()]).size;
+  }
+
+  private maybePrune(now: number): void {
+    if (this.failures.size < 1000) return;
     this.prune(now);
   }
 
-  private prune(now: number): void {
-    if (this.failures.size < 1000) return;
+  /**
+   * Removes expired blocks, then trims failure histories to the window and drops empty ones.
+   * Active blocks are preserved together with their history.
+   */
+  prune(now: number = this.now()): void {
+    for (const [ip, until] of this.blockedUntil) {
+      if (until <= now) this.blockedUntil.delete(ip);
+    }
     for (const [ip, times] of this.failures) {
-      if (times.every((time) => now - time >= this.windowMs) && !this.blockedUntil.has(ip)) {
-        this.failures.delete(ip);
-      }
+      if (this.blockedUntil.has(ip)) continue;
+      const recent = times.filter((time) => now - time < this.windowMs);
+      if (recent.length === 0) this.failures.delete(ip);
+      else this.failures.set(ip, recent);
     }
   }
 }

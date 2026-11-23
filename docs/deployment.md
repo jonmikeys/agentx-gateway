@@ -21,10 +21,15 @@ docker compose up -d --build
 curl http://localhost:3000/health     # {"ok":true,"db":true,"version":"..."}
 ```
 
+The app port binds to `127.0.0.1` by default. To reach it from another machine on a trusted
+LAN, set `GATEWAY_BIND_ADDRESS=0.0.0.0` in `.env`; anyone who can reach that port directly can
+spoof `X-Forwarded-For`, so keep it off untrusted networks and prefer the Caddy profile below.
+
 `DATABASE_URL` in `.env` is ignored by Compose: the app container always connects to the
 bundled `postgres` service using `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`
-(default `agentx`). Migrations apply on every start. Uploaded media lives in the `media-data`
-volume mounted at `/data/media`.
+(default `agentx`). `docker-entrypoint.sh` builds the connection string and percent-encodes
+each component, so reserved characters in the password are safe. Migrations apply on every
+start. Uploaded media lives in the `media-data` volume mounted at `/data/media`.
 
 Back up the `GATEWAY_ENCRYPTION_KEY` together with database backups; the database alone is
 useless for restoring provider keys and other secrets without it.
@@ -44,9 +49,9 @@ Caddy obtains and renews Let's Encrypt certificates automatically (state in the 
 volume) and proxies to `app:3000` with response buffering disabled so streamed (SSE) replies
 arrive token by token.
 
-Set `GATEWAY_BIND_ADDRESS=127.0.0.1` in `.env` so the app's own port 3000 is not reachable from
-outside; only Caddy (80/443) should be public. Caddy sets `X-Forwarded-For`, which the admin
-failed-login limiter uses to identify clients.
+The app port binds to `127.0.0.1` by default, so only Caddy (80/443) should be public. Caddy
+replaces `X-Forwarded-For` with the real client address, which the admin failed-login limiter
+uses to identify clients; Caddy's value is used instead of any client-supplied prefix.
 
 ## Backups
 
