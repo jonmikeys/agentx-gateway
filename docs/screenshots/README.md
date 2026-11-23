@@ -28,6 +28,10 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-sessions-search-light.png](state-sessions-search-light.png) | Sessions: full-text search for "sunset" (light theme) |
 | ![state-sessions-standalone-light.png](state-sessions-standalone-light.png) | Sessions: one-shot helper calls are hidden by default and shown with a Standalone badge (light theme) |
 | ![state-sessions-bulk-delete-light.png](state-sessions-bulk-delete-light.png) | Sessions: bulk delete confirmation stating the deletion is permanent (light theme) |
+| ![state-media-upload-dialog-light.png](state-media-upload-dialog-light.png) | Media: upload dialog with drag-and-drop, queued files, limits and a rejected file (light theme) |
+| ![state-media-edit-dialog-light.png](state-media-edit-dialog-light.png) | Media: edit dialog (the description is what the model uses to choose; tags select media per agent) (light theme) |
+| ![state-camera-dialog-light.png](state-camera-dialog-light.png) | Cameras: edit dialog for an MJPEG camera (credentials are write-only: only the masked username shows) (light theme) |
+| ![state-camera-preview-light.png](state-camera-preview-light.png) | Cameras: live MJPEG preview through the admin-only proxy (Unity connects directly) (light theme) |
 | ![state-command-palette-light.png](state-command-palette-light.png) | Ctrl+K command palette listing every page (light theme) |
 | ![overview-dashboard-dark.png](overview-dashboard-dark.png) | Overview / Dashboard: Active sessions, usage, failovers and provider health at a glance. (dark theme) |
 | ![conversations-sessions-dark.png](conversations-sessions-dark.png) | Conversations / Sessions: Browse conversation sessions and read full transcripts. (dark theme) |
@@ -52,4 +56,8 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-sessions-search-dark.png](state-sessions-search-dark.png) | Sessions: full-text search for "sunset" (dark theme) |
 | ![state-sessions-standalone-dark.png](state-sessions-standalone-dark.png) | Sessions: one-shot helper calls are hidden by default and shown with a Standalone badge (dark theme) |
 | ![state-sessions-bulk-delete-dark.png](state-sessions-bulk-delete-dark.png) | Sessions: bulk delete confirmation stating the deletion is permanent (dark theme) |
+| ![state-media-upload-dialog-dark.png](state-media-upload-dialog-dark.png) | Media: upload dialog with drag-and-drop, queued files, limits and a rejected file (dark theme) |
+| ![state-media-edit-dialog-dark.png](state-media-edit-dialog-dark.png) | Media: edit dialog (the description is what the model uses to choose; tags select media per agent) (dark theme) |
+| ![state-camera-dialog-dark.png](state-camera-dialog-dark.png) | Cameras: edit dialog for an MJPEG camera (credentials are write-only: only the masked username shows) (dark theme) |
+| ![state-camera-preview-dark.png](state-camera-preview-dark.png) | Cameras: live MJPEG preview through the admin-only proxy (Unity connects directly) (dark theme) |
 | ![state-command-palette-dark.png](state-command-palette-dark.png) | Ctrl+K command palette listing every page (dark theme) |
