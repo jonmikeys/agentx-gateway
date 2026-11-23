@@ -17,6 +17,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // The whole suite shares one `next start` process; server components can take longer than the
+  // 5 s default to render while the heavy layout spec runs alongside. This is a wait ceiling,
+  // not an assertion that things must be slow.
+  expect: { timeout: 15_000 },
   use: { baseURL, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

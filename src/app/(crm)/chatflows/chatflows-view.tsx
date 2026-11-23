@@ -129,6 +129,7 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
         },
       });
       toast.success(createKind === "subflow" ? "Subflow created" : "Chatflow created");
+      setCreating(false);
       router.push(`/chatflows/${created.id}`);
     } catch (error) {
       toast.error(errorMessage(error));

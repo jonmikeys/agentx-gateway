@@ -25,6 +25,8 @@ test("notes, groups, hiding, version diff, export and import", async ({ page }) 
   const flowName = `Extras ${runId}`;
   await page.getByRole("textbox", { name: "Name" }).fill(flowName);
   await page.getByRole("button", { name: "Create chatflow" }).click();
+  // The create dialog stays up until the editor's server component resolves.
+  await expect(page).toHaveURL(/\/chatflows\/[^/]+$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: flowName, level: 1 })).toBeVisible();
 
   // Publish the starter flow so there is a version to compare with later.
@@ -116,7 +118,7 @@ test("notes, groups, hiding, version diff, export and import", async ({ page }) 
   const diffPanel = page.getByTestId("version-diff");
   await expect(diffPanel).toBeVisible();
   await expect(diffPanel.getByText("Added nodes")).toBeVisible();
-  await expect(diffPanel.getByText(/^Group\b/)).toBeVisible();
+  await expect(diffPanel.getByTitle("Group (group)")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("Comparing version with draft")).toBeVisible();

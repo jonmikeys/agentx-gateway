@@ -17,12 +17,16 @@ test.use({
 test.describe.configure({ mode: "default" });
 
 test("build, publish and test a chatflow", async ({ page }) => {
+  // The full suite runs in parallel with the heavy layout spec; allow for a busy server.
+  test.setTimeout(120_000);
   await page.goto("/chatflows");
   await expect(page.getByRole("heading", { name: "Chatflows", level: 1 })).toBeVisible();
 
   await page.getByRole("button", { name: "New chatflow" }).first().click();
   await page.getByRole("textbox", { name: "Name" }).fill(`E2E greeter ${runId}`);
   await page.getByRole("button", { name: "Create chatflow" }).click();
+  // The create dialog stays up until the editor's server component resolves.
+  await expect(page).toHaveURL(/\/chatflows\/[^/]+$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: `E2E greeter ${runId}`, level: 1 })).toBeVisible();
 
   // The starter flow is Start -> Reply -> End; make the reply use the user's text.
@@ -59,10 +63,12 @@ test("build, publish and test a chatflow", async ({ page }) => {
 });
 
 test("add a Client Action node and pick media for it", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto("/chatflows");
   await page.getByRole("button", { name: "New chatflow" }).first().click();
   await page.getByRole("textbox", { name: "Name" }).fill(`E2E client action ${runId}`);
   await page.getByRole("button", { name: "Create chatflow" }).click();
+  await expect(page).toHaveURL(/\/chatflows\/[^/]+$/, { timeout: 30_000 });
   await expect(
     page.getByRole("heading", { name: `E2E client action ${runId}`, level: 1 }),
   ).toBeVisible();

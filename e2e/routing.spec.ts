@@ -26,6 +26,8 @@ test("create a provider, test it, create a route and an API key, then call the g
   page,
   request,
 }) => {
+  // Five UI steps plus live gateway calls; 30s is too tight when the full suite runs in parallel.
+  test.setTimeout(120_000);
   // Provider
   await page.goto("/providers");
   await expect(page.getByRole("heading", { name: "Providers" })).toBeVisible();
