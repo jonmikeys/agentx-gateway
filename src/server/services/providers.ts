@@ -132,6 +132,13 @@ export async function createProvider(input: ProviderCreateInput): Promise<Provid
   }
 }
 
+/** The keys of a partial object that were actually sent. */
+function definedEntries<T extends object>(partial: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(partial).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
+}
+
 function hasHeaders(
   headers: Record<string, string> | null | undefined,
 ): headers is Record<string, string> {
@@ -142,12 +149,14 @@ export async function updateProvider(
   id: string,
   input: ProviderUpdateInput,
 ): Promise<ProviderView> {
-  await findProviderRow(id);
+  const existing = await findProviderRow(id);
   const changes: Partial<typeof providers.$inferInsert> = { updatedAt: new Date() };
   if (input.name !== undefined) changes.name = input.name;
   if (input.base_url !== undefined) changes.baseUrl = normalizeBaseUrl(input.base_url);
   if (input.enabled !== undefined) changes.enabled = input.enabled;
-  if (input.capabilities !== undefined) changes.capabilities = input.capabilities;
+  if (input.capabilities !== undefined) {
+    changes.capabilities = { ...existing.capabilities, ...definedEntries(input.capabilities) };
+  }
   // Absent = keep; null = clear; string = replace.
   if (input.api_key !== undefined) {
     changes.apiKey = input.api_key ? encryptSecret(input.api_key) : null;

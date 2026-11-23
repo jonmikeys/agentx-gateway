@@ -1,4 +1,7 @@
 import { type APIRequestContext, expect, request } from "@playwright/test";
+import { makePng } from "../tests/support/media-files";
+import { type MockMediaServer, startMockMediaServer } from "../tests/support/mock-media-server";
+import { type MockMjpeg, startMockMjpeg } from "../tests/support/mock-mjpeg";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
 
 /**
@@ -20,8 +23,111 @@ export const providerNames = {
 export const longBaseUrlPath = `/v1/${"a".repeat(120)}`;
 export const routeSlug = "layout-qa-route-with-a-very-long-id-for-checking-layout-1234";
 export const keyLabel = "Layout QA key \u{1F680} with a long text that keeps going and going on";
+/** Media and cameras with long names, many tags and a long stream URL. */
+export const mediaNames = {
+  long: `Layout QA picture \u{1F305} with a very long display title that keeps going${" and going".repeat(2)}`,
+  external: "Layout QA external picture",
+  clip: "Layout QA external clip",
+};
+export const cameraNames = {
+  good: `Layout QA camera with an extremely long display title that keeps going 123`,
+  unreachable: "Layout QA unreachable camera",
+  lookAt: "Layout QA look-at sidecar",
+};
 export const CHAT_ROUTE = "layout-qa-failover";
 export const SESSION_IDS_ENV = "LAYOUT_QA_SESSION_IDS";
+
+async function seedMediaAndCameras(admin: APIRequestContext) {
+  const names = async (collection: string) =>
+    new Set(
+      (
+        ((await (await admin.get(`/api/admin/${collection}`)).json()).data ?? []) as {
+          name: string;
+        }[]
+      ).map((item) => item.name),
+    );
+  const knownMedia = await names("media");
+  const tags = [
+    "layout",
+    `a-very-long-tag-${"x".repeat(15)}`,
+    "nature",
+    "scenery",
+    "brand",
+    "info",
+    "navigation",
+    "video",
+    "lobby",
+    "demo",
+  ];
+  const upload = async (name: string, size: [number, number]) => {
+    if (knownMedia.has(name)) return;
+    const response = await admin.post("/api/admin/media/upload", {
+      multipart: {
+        name,
+        description: `Layout QA ${"lorem ipsum ".repeat(30)}`,
+        tags: tags.join(","),
+        file: {
+          name: `${name}.png`.slice(-120),
+          mimeType: "image/png",
+          buffer: makePng(size[0], size[1], [30, 120, 200]),
+        },
+      },
+    });
+    expect(response.status()).toBe(201);
+  };
+  await upload(mediaNames.long, [64, 48]);
+  for (let index = 1; index <= 8; index += 1) {
+    await upload(`Layout QA picture ${index}`, [48 + index, 36]);
+  }
+  const external = async (name: string, path: string) => {
+    if (knownMedia.has(name)) return;
+    const response = await admin.post("/api/admin/media", {
+      data: { name, tags: ["layout", "external"], external_url: `${mediaServer.url}${path}` },
+    });
+    expect(response.status()).toBe(201);
+  };
+  await external(mediaNames.external, "/pic.png");
+  await external(mediaNames.clip, "/clip.mp4");
+
+  const knownCameras = new Map(
+    (
+      ((await (await admin.get("/api/admin/cameras")).json()).data ?? []) as {
+        id: string;
+        name: string;
+      }[]
+    ).map((item) => [item.name, item.id]),
+  );
+  const camera = async (data: Record<string, unknown>) => {
+    const existing = knownCameras.get(data.name as string);
+    if (existing) {
+      // The mock stream gets a new port every run, so point a reused camera at the current one.
+      if (data.url) {
+        const response = await admin.patch(`/api/admin/cameras/${existing}`, {
+          data: { url: data.url },
+        });
+        expect(response.status()).toBe(200);
+      }
+      return;
+    }
+    expect((await admin.post("/api/admin/cameras", { data })).status()).toBe(201);
+  };
+  await camera({
+    type: "mjpeg_url",
+    name: cameraNames.good,
+    description: `Layout QA ${"a long camera description ".repeat(10)}`,
+    url: mjpeg.streamUrl,
+  });
+  await camera({
+    type: "mjpeg_url",
+    name: cameraNames.unreachable,
+    url: `${mjpeg.url}/${"p".repeat(120)}`,
+  });
+  await camera({
+    type: "lookat_sidecar",
+    name: cameraNames.lookAt,
+    description: "Configured in the Unity app.",
+  });
+}
 
 /** Seeded session ids by scenario. */
 export interface SessionIds {
@@ -31,6 +137,8 @@ export interface SessionIds {
   ended: string;
   responses: string;
 }
+let mediaServer: MockMediaServer;
+let mjpeg: MockMjpeg;
 const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
@@ -53,11 +161,7 @@ async function seed(admin: APIRequestContext, upstream: MockUpstream) {
       // The mock upstream gets a new port every run, so point reused rows at the current one.
       if (found.base_url !== base_url) {
         const response = await admin.patch(`/api/admin/providers/${found.id}`, {
-          // A PATCH without capabilities resets them to the defaults, so always resend them.
-          data: {
-            base_url,
-            capabilities: { streaming: true, tools: true, responses_api: Boolean(responsesApi) },
-          },
+          data: { base_url },
         });
         expect(response.status()).toBe(200);
       }
@@ -255,9 +359,12 @@ async function seedSessions(admin: APIRequestContext, baseURL: string) {
 export default async function globalSetup() {
   const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
   const upstream = await startMockUpstream({ models: ["ok", "mock-model"] });
+  mediaServer = await startMockMediaServer();
+  mjpeg = await startMockMjpeg({ frameIntervalMs: 50 });
   const admin = await request.newContext({ baseURL, httpCredentials: { username, password } });
   try {
     await seed(admin, upstream);
+    await seedMediaAndCameras(admin);
     await seedSessions(admin, baseURL);
   } finally {
     await admin.dispose();
@@ -265,5 +372,7 @@ export default async function globalSetup() {
   process.env[SESSION_IDS_ENV] = JSON.stringify(sessionIds);
   return async () => {
     await upstream.close();
+    await mediaServer.close();
+    await mjpeg.close();
   };
 }

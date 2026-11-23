@@ -1,5 +1,9 @@
-import { PagePlaceholder } from "@/components/app-shell/page-placeholder";
+import { MediaLibrary } from "@/app/(crm)/media/media-library";
+import { listMedia, listMediaTags, toMediaView } from "@/server/services/media";
 
-export default function Page() {
-  return <PagePlaceholder href="/media" />;
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  const [rows, tags] = await Promise.all([listMedia(), listMediaTags()]);
+  return <MediaLibrary items={rows.map(toMediaView)} tags={tags} />;
 }

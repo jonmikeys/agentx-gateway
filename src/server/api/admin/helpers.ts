@@ -4,7 +4,7 @@ import { ServiceError } from "@/server/services/errors";
 
 export function adminError(
   c: Context,
-  status: 400 | 404 | 409,
+  status: 400 | 404 | 409 | 413 | 415 | 502,
   code: string,
   message: string,
   details?: unknown,

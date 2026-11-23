@@ -14,7 +14,7 @@ docker compose -f docker-compose.dev.yml up -d     # Postgres on localhost:5432
 ```
 
 Set in `.env`: `DATABASE_URL=postgres://agentx:agentx@localhost:5432/agentx`, `ADMIN_USERNAME`,
-`ADMIN_PASSWORD`. Then `pnpm dev` and open <http://localhost:3000>. Migrations run
+`ADMIN_PASSWORD`, and `MEDIA_STORAGE_DIR=./data/media` (uploads; `data/` is git-ignored). Then `pnpm dev` and open <http://localhost:3000>. Migrations run
 automatically when the server starts (`src/instrumentation.ts`); `pnpm db:migrate` runs them
 on demand. `.env` is read by Next.js and by the `db:*` / `secrets:*` scripts; Vitest does not
 need it.
@@ -23,7 +23,7 @@ need it.
 
 | Path | Purpose |
 |---|---|
-| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Providers, Model Routes, API Keys, Settings implemented; the rest are placeholders) |
+| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Providers, Model Routes, API Keys, Settings, Media, Cameras implemented; the rest are placeholders) |
 | `src/app/v1`, `src/app/agents`, `src/app/health` | Thin Next route files that mount the Hono client API |
 | `src/app/api/admin` | Mounts the admin Hono app (requires AdminAuth) |
 | `src/proxy.ts` | Guards every CRM page and `/api/admin/*` with HTTP Basic auth |
@@ -89,8 +89,8 @@ backup first, and keep the new key somewhere safe: without it secrets are unreco
 | Command | What it covers |
 |---|---|
 | `pnpm test:unit` | Secrets (round trip, tamper detection, masking), env validation, AdminAuth parsing and rate limit, `openAIError`, CORS and 404 shape, nav data integrity, CIDR matcher, API key format, route selection, failover classifier and error mapping, circuit breaker, SSE parser |
-| `pnpm test:integration` | Migrations apply to a real Postgres (Testcontainers), `/health`, secret rotation (including the provider columns), the admin API (secrets never returned), and the client API against `tests/support/mock-upstream.ts`: passthrough, failover, circuit breaker, error mapping, auth, allowlist and rate limits, request log, sessions (header contract, transcript capture, retention, exports, search, dashboard stats). Needs Docker |
-| `pnpm test:e2e` | Playwright against a running app (also the sessions viewer: search, thinking, tool card, end session and the layout guards of `e2e/layout.spec.ts`, see [`ui-qa.md`](ui-qa.md)): 401 without credentials, sidebar groups, navigation, Ctrl+K palette, `/api/admin/me`, and the G2 flow (create provider, test it, create route and API key, call the gateway through a mock upstream) |
+| `pnpm test:integration` | Media and camera APIs (uploads, Range, external URL checks, MJPEG test and preview, credentials at rest and rotation: `media.test.ts`, `cameras.test.ts`). Migrations apply to a real Postgres (Testcontainers), `/health`, secret rotation (including the provider columns), the admin API (secrets never returned), and the client API against `tests/support/mock-upstream.ts`: passthrough, failover, circuit breaker, error mapping, auth, allowlist and rate limits, request log, sessions (header contract, transcript capture, retention, exports, search, dashboard stats). Needs Docker |
+| `pnpm test:e2e` | Playwright (including `e2e/media.spec.ts`: upload, edit, camera test and preview against `tests/support/mock-mjpeg.ts`) against a running app (also the sessions viewer: search, thinking, tool card, end session and the layout guards of `e2e/layout.spec.ts`, see [`ui-qa.md`](ui-qa.md)): 401 without credentials, sidebar groups, navigation, Ctrl+K palette, `/api/admin/me`, and the G2 flow (create provider, test it, create route and API key, call the gateway through a mock upstream) |
 | `pnpm screenshots` | Captures every CRM page plus key states (light and dark, 1440x900) into `docs/screenshots`. Needs a running app and a fresh database (it also reads `DATABASE_URL`, default `postgres://agentx:agentx@localhost:5432/agentx`, to backdate demo history); see `playwright.screenshots.config.ts` |
 
 Run the e2e tests against a built app:

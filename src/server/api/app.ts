@@ -2,6 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { registerClientRoutes } from "@/server/api/client-routes";
 import { openAIError } from "@/server/api/errors";
+import { registerMediaRoutes } from "@/server/api/media-routes";
 import { pingDatabase } from "@/server/db/client";
 import { type ClientEnv, clientAuth } from "@/server/gateway/client-auth";
 import { logger } from "@/server/logger";
@@ -20,9 +21,9 @@ export function createApiApp(options: ApiAppOptions = {}): Hono<ClientEnv> {
 
   const clientCors = cors({
     origin: "*",
-    allowHeaders: ["Authorization", "X-Session-Id", "Content-Type"],
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    exposeHeaders: ["X-Session-Id"],
+    allowHeaders: ["Authorization", "X-Session-Id", "Content-Type", "Range"],
+    allowMethods: ["GET", "HEAD", "POST", "OPTIONS"],
+    exposeHeaders: ["X-Session-Id", "Content-Range", "Accept-Ranges", "Content-Length", "ETag"],
     maxAge: 600,
   });
   app.use("/v1/*", clientCors);
@@ -39,7 +40,8 @@ export function createApiApp(options: ApiAppOptions = {}): Hono<ClientEnv> {
   });
 
   registerClientRoutes(app);
-  // Later stages register /v1/responses, /agents, ... here.
+  registerMediaRoutes(app);
+  // Later stages register /agents, ... here.
 
   app.notFound((c) => {
     const path = new URL(c.req.url).pathname;

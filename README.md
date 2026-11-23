@@ -27,6 +27,10 @@ for the agreed design.
   thinking blocks and tool calls, a transcript viewer with live updates, full-text search,
   retention, optional redaction and JSON/Markdown/CSV export.
   See [docs/sessions-and-transcripts.md](docs/sessions-and-transcripts.md).
+- **Media and cameras** (G5): image/video uploads (streamed to `MEDIA_STORAGE_DIR`, type sniffed
+  from the bytes) or external URLs, served to Unity with HTTP `Range` support at
+  `/v1/media`, plus MJPEG camera catalogue with encrypted credentials at `/v1/cameras`.
+  See [docs/media-content.md](docs/media-content.md).
 - **Dashboard** with sessions, turns, tokens, failovers and provider latency.
 - **Request log** (timings, attempts, token usage; never message content).
 - Admin console with Basic auth, dark/light themes and a Ctrl+K command palette

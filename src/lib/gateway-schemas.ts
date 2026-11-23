@@ -29,8 +29,20 @@ export const providerCreateSchema = z.object({
   extra_headers: headersSchema.nullish(),
 });
 
-/** On update, an absent `api_key` / `extra_headers` keeps the stored value; `null` clears it. */
-export const providerUpdateSchema = providerCreateSchema.partial();
+/**
+ * Partial update: every omitted field keeps its stored value. `api_key` / `extra_headers` accept
+ * `null` to clear. Built without the create schema's defaults, because `.partial()` keeps them and
+ * would silently reset `enabled` and `capabilities` when they are omitted. `capabilities` merges
+ * key by key, so `{ responses_api: true }` leaves `streaming` and `tools` alone.
+ */
+export const providerUpdateSchema = z.object({
+  name: providerCreateSchema.shape.name.optional(),
+  base_url: baseUrlSchema.optional(),
+  api_key: providerCreateSchema.shape.api_key,
+  enabled: z.boolean().optional(),
+  capabilities: capabilitiesSchema.partial().optional(),
+  extra_headers: providerCreateSchema.shape.extra_headers,
+});
 
 export type ProviderCreateInput = z.infer<typeof providerCreateSchema>;
 export type ProviderUpdateInput = z.infer<typeof providerUpdateSchema>;

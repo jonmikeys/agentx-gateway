@@ -22,6 +22,7 @@ shadcn conventions; no one-off colours or pixel hacks.
   a key label with emoji. User text in tables goes through `TruncatedText` (ellipsis plus a tooltip
   with the full value); text in dialogs wraps (`break-words` or `break-all` for tokens and URLs).
 - **Names**: every icon-only button has an `aria-label`; badges never wrap (`whitespace-nowrap`).
+- **Non-text contrast**: control boundaries (the unchecked `Switch` track, checkbox and input borders) must reach 3:1 against the page in both themes; the unchecked switch uses the `muted-foreground` track and a `foreground`-derived border for that, so it does not read as disabled.
 - **Charts**: series colours come from the `--chart-1..5` theme tokens (distinct hues, at least 3:1 against the card in both themes). Never use one grey for two series, and never colour with `--primary`.
 - **Scrollable regions**: a horizontally scrolling table is focusable (built into `Table`) so keyboard users can scroll it; popovers and dialogs need an accessible name.
 - **Toasts** do not cover the header controls.

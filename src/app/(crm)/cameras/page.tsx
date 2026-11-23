@@ -1,5 +1,8 @@
-import { PagePlaceholder } from "@/components/app-shell/page-placeholder";
+import { CamerasView } from "@/app/(crm)/cameras/cameras-view";
+import { listCameras, toCameraView } from "@/server/services/cameras";
 
-export default function Page() {
-  return <PagePlaceholder href="/cameras" />;
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  return <CamerasView cameras={(await listCameras()).map(toCameraView)} />;
 }

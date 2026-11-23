@@ -29,6 +29,13 @@
       "when": 1795356138969,
       "tag": "0003_amused_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795368882358,
+      "tag": "0004_typical_junta",
+      "breakpoints": true
     }
   ]
 }
