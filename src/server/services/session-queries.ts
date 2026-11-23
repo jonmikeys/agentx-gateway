@@ -120,6 +120,7 @@ function toItemView(row: typeof transcriptItems.$inferSelect): TranscriptItemVie
     tool_name: row.toolName,
     tool_args: row.toolArgs ?? null,
     tool_source: row.toolSource,
+    duration_ms: row.durationMs,
     llm_request_id: row.llmRequestId,
     created_at: row.createdAt.toISOString(),
   };

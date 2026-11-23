@@ -213,6 +213,18 @@ export async function persistRequest(input: PersistTurnInput): Promise<void> {
       });
     }
 
+    for (const item of input.outcome.mcpItems ?? []) {
+      rows.push({
+        kind: item.kind,
+        content: clean(item.content ?? ""),
+        toolCallId: item.toolCallId,
+        toolName: item.toolName,
+        toolArgs: item.kind === "tool_call" ? cleanValue(item.toolArgs ?? null) : null,
+        toolSource: "mcp",
+        durationMs: item.durationMs,
+      });
+    }
+
     const captured = input.outcome.captured;
     if (captured?.reasoning) rows.push({ kind: "reasoning", content: clean(captured.reasoning) });
     if (captured?.text) rows.push({ kind: "assistant_message", content: clean(captured.text) });

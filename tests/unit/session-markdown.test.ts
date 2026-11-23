@@ -15,6 +15,7 @@ function item(
     tool_name: null,
     tool_args: null,
     tool_source: null,
+    duration_ms: null,
     llm_request_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     ...partial,
