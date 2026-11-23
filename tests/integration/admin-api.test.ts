@@ -89,6 +89,33 @@ describe("admin API", () => {
       expect(cleared.api_key_masked).toBeNull();
     });
 
+    it("keeps omitted fields on a partial update and merges capabilities", async () => {
+      const created = await (
+        await call("providers", "POST", {
+          name: "Partial",
+          base_url: "https://api.example.com/v1",
+          enabled: false,
+          capabilities: { streaming: false, tools: true, responses_api: true },
+        })
+      ).json();
+
+      const renamed = await (
+        await call(`providers/${created.id}`, "PATCH", { name: "Partial renamed" })
+      ).json();
+      expect(renamed.enabled).toBe(false);
+      expect(renamed.capabilities).toEqual({ streaming: false, tools: true, responses_api: true });
+
+      const merged = await (
+        await call(`providers/${created.id}`, "PATCH", { capabilities: { tools: false } })
+      ).json();
+      expect(merged.capabilities).toEqual({
+        streaming: false,
+        tools: false,
+        responses_api: true,
+      });
+      expect(merged.name).toBe("Partial renamed");
+    });
+
     it("supports keyless providers", async () => {
       const response = await call("providers", "POST", {
         name: "Ollama",

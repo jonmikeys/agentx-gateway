@@ -53,11 +53,7 @@ async function seed(admin: APIRequestContext, upstream: MockUpstream) {
       // The mock upstream gets a new port every run, so point reused rows at the current one.
       if (found.base_url !== base_url) {
         const response = await admin.patch(`/api/admin/providers/${found.id}`, {
-          // A PATCH without capabilities resets them to the defaults, so always resend them.
-          data: {
-            base_url,
-            capabilities: { streaming: true, tools: true, responses_api: Boolean(responsesApi) },
-          },
+          data: { base_url },
         });
         expect(response.status()).toBe(200);
       }
