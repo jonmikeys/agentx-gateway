@@ -23,15 +23,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
+import type { McpToolView } from "@/server/services/mcp";
 import type { ProviderView } from "@/server/services/providers";
 import type { RouteView } from "@/server/services/routes";
 
 export function RoutesView({
   routes,
   providers,
+  mcpTools,
 }: {
   routes: RouteView[];
   providers: ProviderView[];
+  mcpTools: McpToolView[];
 }) {
   const router = useRouter();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -66,6 +69,7 @@ export function RoutesView({
                 upstream_model: step.upstream_model,
                 timeout_ms: step.timeout_ms,
               })),
+              mcp_tool_ids: route.mcp_tool_ids,
             },
           }),
         enabled ? "Route enabled" : "Route disabled",
@@ -135,6 +139,16 @@ export function RoutesView({
               </li>
             ))}
           </ol>
+        ),
+      },
+      {
+        id: "mcp",
+        header: "MCP tools",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Badge variant={row.original.mcp_tool_ids.length > 0 ? "secondary" : "outline"}>
+            {row.original.mcp_tool_ids.length}
+          </Badge>
         ),
       },
       {
@@ -213,6 +227,7 @@ export function RoutesView({
         open={editorOpen}
         route={editing}
         providers={providers}
+        mcpTools={mcpTools}
         onOpenChange={setEditorOpen}
       />
 
