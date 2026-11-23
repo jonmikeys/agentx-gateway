@@ -44,7 +44,7 @@ describe("ChatToResponsesStream", () => {
     expect(sequence).toEqual(sequence.map((_, index) => index));
     expect(events.every((event) => event.data.type === event.type)).toBe(true);
 
-    const completed = events.at(-1)?.data.response as Json;
+    const completed = events[events.length - 1].data.response as Json;
     expect(completed.status).toBe("completed");
     expect(completed.model).toBe("avatar-default");
     expect(completed.usage).toMatchObject({ input_tokens: 5, output_tokens: 3, total_tokens: 8 });
@@ -82,7 +82,7 @@ describe("ChatToResponsesStream", () => {
     ]);
     const deltas = events.filter((event) => event.type.endsWith("text.delta"));
     expect(deltas.map((event) => event.data.delta)).toEqual(["hm ", "deep", "Answer"]);
-    const output = (events.at(-1)?.data.response as Json).output as Json[];
+    const output = (events[events.length - 1].data.response as Json).output as Json[];
     expect(output.map((item) => item.type)).toEqual(["reasoning", "message"]);
     expect(output[0].summary).toEqual([{ type: "summary_text", text: "hm deep" }]);
   });
@@ -113,7 +113,7 @@ describe("ChatToResponsesStream", () => {
     ]);
     const done = events.find((event) => event.type === "response.function_call_arguments.done");
     expect(done?.data.arguments).toBe('{"media_id":"sunset"}');
-    const output = (events.at(-1)?.data.response as Json).output as Json[];
+    const output = (events[events.length - 1].data.response as Json).output as Json[];
     expect(output[1]).toMatchObject({
       type: "function_call",
       call_id: "call_9",
@@ -137,7 +137,7 @@ describe("ChatToResponsesStream", () => {
         "tool_calls",
       ),
     ]);
-    const output = (events.at(-1)?.data.response as Json).output as Json[];
+    const output = (events[events.length - 1].data.response as Json).output as Json[];
     expect(output.map((item) => item.name)).toEqual(["one", "two", "three"]);
     const added = events.filter((event) => event.type === "response.output_item.added");
     // The item is announced only once its name is known.
