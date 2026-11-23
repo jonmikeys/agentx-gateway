@@ -206,7 +206,7 @@ function convertTools(tools: unknown): unknown[] | undefined {
   if (tools.length === 0) return undefined;
   return tools.map((raw) => {
     const tool = asObject(raw);
-    if (!tool || tool.type !== "function") {
+    if (tool?.type !== "function") {
       throw new TranslationError(
         "unsupported_tool",
         `Tool type "${String(tool?.type)}" is not supported for translated Responses requests: only function tools can be converted to chat completions.`,

@@ -11,6 +11,8 @@ export default defineConfig({
   testDir: "./e2e",
   // Screenshot capture has its own config: `pnpm screenshots`.
   testIgnore: "screenshots.spec.ts",
+  // Seeds the nasty data for e2e/layout.spec.ts once, before any worker starts.
+  globalSetup: "./e2e/layout-seed.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

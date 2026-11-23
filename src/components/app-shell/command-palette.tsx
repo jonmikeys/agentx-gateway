@@ -43,13 +43,12 @@ export function CommandPalette() {
         size="sm"
         className="w-8 justify-center px-0 text-muted-foreground sm:w-56 sm:justify-between sm:px-3"
         onClick={() => setOpen(true)}
-        aria-label="Open command palette"
       >
         <span className="flex items-center gap-2">
           <Search className="size-4" />
-          <span className="hidden sm:inline">Search pages...</span>
+          <span className="sr-only sm:not-sr-only">Search pages...</span>
         </span>
-        <kbd className="pointer-events-none hidden rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:inline">
+        <kbd className="pointer-events-none hidden rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-foreground sm:inline">
           Ctrl K
         </kbd>
       </Button>

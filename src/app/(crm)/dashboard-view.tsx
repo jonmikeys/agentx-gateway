@@ -23,17 +23,17 @@ import { formatCount, formatDuration } from "@/lib/format";
 import type { DashboardStats } from "@/lib/session-types";
 
 const activityConfig = {
-  sessions: { label: "Sessions", color: "var(--chart-2)" },
-  turns: { label: "Turns", color: "var(--primary)" },
+  sessions: { label: "Sessions", color: "var(--chart-1)" },
+  turns: { label: "Turns", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
 const problemsConfig = {
-  failovers: { label: "Failovers", color: "var(--chart-2)" },
+  failovers: { label: "Failovers", color: "var(--chart-1)" },
   errors: { label: "Errors", color: "var(--destructive)" },
 } satisfies ChartConfig;
 
 const tokensConfig = {
-  tokens: { label: "Tokens", color: "var(--chart-2)" },
+  tokens: { label: "Tokens", color: "var(--chart-3)" },
 } satisfies ChartConfig;
 
 function StatCard({ title, value, hint }: { title: string; value: string; hint: string }) {

@@ -24,6 +24,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
@@ -188,10 +189,17 @@ export function ProviderFormDialog({
                   control={control}
                   name="clear_api_key"
                   render={({ field }) => (
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch checked={field.value} onCheckedChange={field.onChange} size="sm" />
-                      Remove the stored key
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="provider-clear-key"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        size="sm"
+                      />
+                      <Label htmlFor="provider-clear-key" className="font-normal">
+                        Remove the stored key
+                      </Label>
+                    </div>
                   )}
                 />
               )}
@@ -215,10 +223,17 @@ export function ProviderFormDialog({
                   control={control}
                   name="clear_extra_headers"
                   render={({ field }) => (
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch checked={field.value} onCheckedChange={field.onChange} size="sm" />
-                      Remove the stored headers
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="provider-clear-headers"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        size="sm"
+                      />
+                      <Label htmlFor="provider-clear-headers" className="font-normal">
+                        Remove the stored headers
+                      </Label>
+                    </div>
                   )}
                 />
               )}

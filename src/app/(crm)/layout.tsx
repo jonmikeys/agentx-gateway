@@ -10,9 +10,9 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <AppHeader />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <div className="min-w-0 flex-1 p-4 md:p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   );
