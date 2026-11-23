@@ -42,8 +42,7 @@ Client (Unity)                      Gateway                                    M
 
 ## Nodes
 
-Every node has a **title** and an optional **comment** (the comment travels with the graph; the
-icon/popover UI is G7b). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`, `Client Action`)
+Every node has a **title** and an optional **comment** (shown as a speech-bubble badge with a popover on the canvas; edit it in the inspector). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`, `Client Action`)
 also have an `error` output handle. Connect `error` to a recovery path; if it is left unconnected a
 failure ends the run as failed.
 
@@ -417,7 +416,10 @@ sequenceDiagram
 - **Keyboard shortcuts** (ignored while typing in an input): `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z`
   or `Ctrl/Cmd+Y` redo, `Ctrl/Cmd+C`/`V` copy and paste, `Ctrl/Cmd+G` group,
   `Ctrl/Cmd+Shift+G` ungroup, `N` add a sticky note, `Delete`/`Backspace` delete the selection.
-- **Settings** holds the agent name, slug, description, enabled flag and default model route.
+- **Settings** holds the agent name, slug, description, enabled flag and default model route, plus
+  **Allowed media tags** (tag input with suggestions from the catalogue) and **Allowed cameras**
+  (a checkbox per registered camera; disabled cameras cannot be ticked). Empty means no restriction;
+  see [Restrictions](#restrictions). For a subflow the tab also lists the callers that use it.
 - The **transcript viewer** shows the session's run traces and memory next to the conversation.
 
 ## Troubleshooting

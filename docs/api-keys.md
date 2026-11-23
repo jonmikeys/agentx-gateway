@@ -1,6 +1,6 @@
 # Client API keys
 
-The client API (`/v1/*` and `/agents`) requires a gateway-issued key; `/health` stays public.
+The client API (`/v1/*` and `/agents`) requires a gateway-issued key; `/health` and `GET /v1/openapi.json` stay public.
 
 ```
 Authorization: Bearer agx_<32 random base62 characters>

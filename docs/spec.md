@@ -98,6 +98,7 @@ Base: `{PUBLIC_BASE_URL}/v1`. Unity's base URL includes `/v1` and builds
 | `GET /v1/media/{id}/content` | file serving with HTTP Range support |
 | `GET /v1/cameras` | camera catalogue (enabled items) |
 | `GET /health` | `{"ok":true,"db":true,"version":"…"}`; 503 when DB is down |
+| `GET /v1/openapi.json` | OpenAPI 3.1 document of this API; unauthenticated. `/docs` renders it (Scalar) behind admin auth |
 
 - Errors use the OpenAI shape `{"error":{"message","type","code"}}`.
 - On chat routes **404 is reserved for `session_not_found`** (Unity treats any 404 on a
@@ -254,14 +255,13 @@ referenced.
 Every production run stores a per-node trace (inputs, outputs, timing, errors), linked
 from the session transcript.
 
-### Implementation notes (G7a)
+### Implementation notes (G7a, G7b)
 Webhook header values are write-only in the editor and stored in `flow_webhook_secrets`
 (AES-256-GCM, one row per flow/node/header, registered in the encrypted-column table) rather
 than inside the graph JSON, so `pnpm secrets:rotate` covers them; the draft and versions keep
 only header names. Client-tool pause/resume, the Client Action node and per-agent media/camera
-restrictions ship in G7b slice A (see `docs/agents.md`); subflows, sticky notes, groups,
-node-comment UI and version diff are the rest of G7b and have extension points (comment field,
-flow kind, settings arrays, terminal/interrupt-aware runtime).
+restrictions ship with G7b (see `docs/agents.md`), as do subflows, sticky notes, groups,
+node-comment UI and version diff.
 
 ## 14. CRM
 
