@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Check, Copy, KeyRound, Pencil, Plus, TriangleAlert } from "lucide-react";
+import { BookOpen, Check, Copy, KeyRound, Pencil, Plus, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -164,16 +164,25 @@ export function ApiKeysView({ apiKeys }: { apiKeys: ApiKeyView[] }) {
         title="API Keys"
         description="Issue, label and revoke client API keys."
         action={
-          <Button
-            ref={newKeyButton}
-            onClick={() => {
-              setEditing(undefined);
-              setFormOpen(true);
-            }}
-          >
-            <Plus />
-            New API key
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              {/* Plain anchor: /docs is a standalone page (Scalar), not a CRM route. */}
+              <a href="/docs" target="_blank" rel="noopener">
+                <BookOpen />
+                API reference
+              </a>
+            </Button>
+            <Button
+              ref={newKeyButton}
+              onClick={() => {
+                setEditing(undefined);
+                setFormOpen(true);
+              }}
+            >
+              <Plus />
+              New API key
+            </Button>
+          </div>
         }
       />
       <DataTable

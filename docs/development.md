@@ -23,7 +23,7 @@ need it.
 
 | Path | Purpose |
 |---|---|
-| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Chatflows editor, Providers, Model Routes, API Keys, Settings, Media, Cameras, MCP implemented; the rest are placeholders) |
+| `src/app/(crm)/` | Admin console pages inside the sidebar shell (Dashboard, Sessions, Chatflows editor, Providers, Model Routes, API Keys, Settings, Media, Cameras, MCP) |
 | `src/app/v1`, `src/app/agents`, `src/app/health` | Thin Next route files that mount the Hono client API |
 | `src/app/api/admin` | Mounts the admin Hono app (requires AdminAuth) |
 | `src/proxy.ts` | Guards every CRM page and `/api/admin/*` with HTTP Basic auth |
@@ -59,14 +59,32 @@ behind a reverse proxy the client IP comes from `X-Forwarded-For`, which Caddy s
 ## Adding things
 
 - **Env variable**: add it to `envSchema` in `src/server/env.ts`, to `.env.example` (empty value
-  plus a comment), and to the table in `docs/spec.md`.
+  plus a comment), to the table in `README.md` and to the table in `docs/spec.md`.
 - **Table**: edit `src/server/db/schema.ts`, run `pnpm db:generate`, commit `drizzle/`.
 - **Encrypted column**: store the value with `encryptSecret()`, display with `maskSecret()`, and
   register the column in `src/server/crypto/encrypted-columns.ts`.
 - **CRM page**: add it to `nav.ts` (groups/pages), then a `page.tsx` under `src/app/(crm)/`.
 - **shadcn component**: `pnpm dlx shadcn@latest add <name>`.
 - **Client API route**: define it with its full path in `src/server/api/app.ts`; errors use
-  `openAIError()`. Remember 404 on chat routes means `session_not_found`.
+  `openAIError()`. Remember 404 on chat routes means `session_not_found`. Also describe the route
+  in the OpenAPI document (see below).
+
+## OpenAPI document
+
+`GET /v1/openapi.json` serves an OpenAPI 3.1 description of the client API (`/v1/*`, `/agents`
+and `/health`). It is generated from the same Zod schemas the routes validate with and lives in
+`src/server/api/openapi.ts`. It is served without authentication, like `/health`, so tools can
+fetch it. `/docs` renders it as a Scalar API reference behind the admin Basic auth.
+
+Every new client route must be added to `src/server/api/openapi.ts`; `tests/unit/openapi.test.ts`
+validates the document and checks that it lists exactly the routes registered on the Hono app, so
+a route without an entry fails the test suite.
+
+The Scalar bundle is served from the gateway itself, not a CDN: `pnpm dev` and `pnpm build` run
+`scripts/vendor-scalar.mjs`, which copies `@scalar/api-reference`'s standalone bundle to
+`public/vendor/scalar/` (git-ignored). Scalar's hosted extras (fonts, telemetry, AI agent, MCP)
+are disabled in `src/app/docs/route.ts`, and `e2e/api-docs.spec.ts` fails if the page makes any
+request outside the gateway.
 
 ## Secrets and key rotation
 
@@ -82,7 +100,8 @@ pnpm secrets:rotate
 ```
 
 Rotation re-encrypts every column in the registry inside one transaction. Take a `pg_dump`
-backup first, and keep the new key somewhere safe: without it secrets are unrecoverable.
+backup first, and keep the new key somewhere safe: without it secrets are unrecoverable. The
+full production procedure (including Docker Compose) is in [operations.md](operations.md#rotating-the-encryption-key).
 
 ## Testing
 

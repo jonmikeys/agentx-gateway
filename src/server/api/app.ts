@@ -3,9 +3,12 @@ import { cors } from "hono/cors";
 import { registerClientRoutes } from "@/server/api/client-routes";
 import { openAIError } from "@/server/api/errors";
 import { registerMediaRoutes } from "@/server/api/media-routes";
+import { buildOpenApiDocument, OPENAPI_PATH } from "@/server/api/openapi";
 import { pingDatabase } from "@/server/db/client";
+import { getEnv } from "@/server/env";
 import { type ClientEnv, clientAuth } from "@/server/gateway/client-auth";
 import { logger } from "@/server/logger";
+import { resolvePublicBaseUrl } from "@/server/media/public-url";
 import packageJson from "../../../package.json";
 
 export const API_VERSION: string = packageJson.version;
@@ -30,7 +33,10 @@ export function createApiApp(options: ApiAppOptions = {}): Hono<ClientEnv> {
   app.use("/agents", clientCors);
 
   const auth = options.clientAuth ?? clientAuth;
-  app.use("/v1/*", auth);
+  // The OpenAPI document is public (like /health) so tools and the /docs reference can load it.
+  app.use("/v1/*", (c, next) =>
+    new URL(c.req.url).pathname === OPENAPI_PATH ? next() : auth(c, next),
+  );
   app.use("/agents", auth);
   app.use("/agents/*", auth);
 
@@ -39,9 +45,14 @@ export function createApiApp(options: ApiAppOptions = {}): Hono<ClientEnv> {
     return c.json({ ok: db, db, version: API_VERSION }, db ? 200 : 503);
   });
 
+  app.get(OPENAPI_PATH, (c) => {
+    const serverUrl = resolvePublicBaseUrl(c.req.url, c.req.raw.headers, getEnv().PUBLIC_BASE_URL);
+    return c.json(buildOpenApiDocument({ version: API_VERSION, serverUrl }));
+  });
+
   registerClientRoutes(app);
   registerMediaRoutes(app);
-  // Later stages register /agents, ... here.
+  // New client routes must also be documented in `openapi.ts` (tests/unit/openapi.test.ts).
 
   app.notFound((c) => {
     const path = new URL(c.req.url).pathname;

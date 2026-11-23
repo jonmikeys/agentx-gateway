@@ -2,9 +2,9 @@
  * Central registry of every database column that stores a value encrypted with
  * `encryptSecret()`. `pnpm secrets:rotate` re-encrypts exactly these columns.
  *
- * G2 registers the provider columns and G5 the camera credentials. Later stages (MCP headers,
- * webhook headers, camera credentials) MUST add an entry here in the same
- * change that introduces the column, otherwise key rotation silently skips it.
+ * Every encrypted column (provider keys and headers, camera credentials, MCP headers, webhook
+ * header values) is listed below. A new encrypted column MUST add an entry here in the same
+ * change that introduces it, otherwise key rotation silently skips it.
  */
 export interface EncryptedColumn {
   /** Table name (snake_case SQL identifier). */

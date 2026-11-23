@@ -20,7 +20,8 @@ Every item has a stable id: `med_` + 12 hex characters for media, `cam_` + 12 he
 lists the catalogue, hands the model the names, descriptions and tags, and the model's tool call
 carries the id back (`{"media_id": "med_..."}`, `{"camera_id": "cam_..."}`). Ids never change, so
 renaming an item does not break anything. Write good **descriptions**: the model reads them to choose.
-Tags drive which items an agent is allowed to use (G7).
+Tags drive which items an agent is allowed to use: the agent's **Allowed media tags** setting
+narrows the media offered to client tools (see [agents.md](agents.md#restrictions)).
 
 ## Media
 
@@ -111,11 +112,11 @@ proxies the MJPEG stream for admins only, adding the stored credentials server-s
 frame boundary within 5 s. Neither exists for `lookat_sidecar`. The proxy aborts the upstream request
 when the browser disconnects.
 
-### Future: RTSP
+### Not supported: RTSP
 
 Security cameras usually speak RTSP, which browsers and Unity's MJPEG reader cannot open. The plan is a
 relay such as go2rtc or MediaMTX that republishes RTSP as MJPEG/HLS, registered as a new
-`rtsp_via_relay` camera type (relay URL plus stream name). Nothing for it is implemented yet; adding it
+`rtsp_via_relay` camera type (relay URL plus stream name). It is not part of v0.1.0; adding it
 means a new member of the Zod union and a new CRM form section.
 
 ## Troubleshooting

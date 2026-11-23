@@ -45,12 +45,12 @@ sequenceDiagram
     G-->>C: 200, X-Session-Id: Bar
 ```
 
-### Agents (hook for G7a)
+### Agents
 
-`agent_id` is stored on the session (it is `null` until agents ship). `resolveSession()` already
-compares the requested agent with the session's agent: when they differ it ends the old session
-with `end_reason = 'agent_changed'` and returns a **new** id, which Unity treats as "conversation
-ended". G7a only has to pass the request's `agent_id` into `resolveSession()`.
+`agent_id` is stored on the session (it is `null` for plain model-route chats).
+`resolveSession()` compares the requested agent with the session's agent: when they differ it
+ends the old session with `end_reason = 'agent_changed'` and returns a **new** id, which Unity
+treats as "conversation ended". See [agents.md](agents.md).
 
 ## What "new items" means
 
@@ -70,7 +70,7 @@ Then the assistant's answer is added from the upstream response:
 | `tool_result` | new client `tool` messages, linked to the call by `tool_call_id` (tool name resolved from the call) |
 | `reasoning` | `delta.reasoning_content`, `delta.reasoning`, and `<think>...</think>` tags in the content (tags may be split across chunks; they are stripped from the stored answer) |
 | `assistant_message` | the visible answer text |
-| `tool_call` | assembled from streamed `delta.tool_calls` by index; `tool_source` is `client` (Unity tools). G6 adds `mcp` |
+| `tool_call` | assembled from streamed `delta.tool_calls` by index; `tool_source` is `client` (Unity tools) or `mcp` (tools the gateway executed) |
 | `error` | an upstream/gateway failure of that request (`all_providers_failed`, a mid-stream error, ...) |
 | `system_prompt` | see above |
 
@@ -120,8 +120,8 @@ runs every minute: expire idle sessions, flag standalone sessions; and once an h
 purge. `POST /api/admin/sessions/maintenance` runs the same pass on demand.
 
 Deleting is a **hard delete** and cascades to turns, transcript items and the linked request
-rows. Later stages (session memory, LangGraph checkpoints, run logs) store data keyed by session
-id outside those tables. They register a cleanup with `registerPurgeHook(name, fn)` from
+rows. Agent data (session memory, LangGraph checkpoints, run logs) is keyed by session
+id outside those tables; the `agent-session-data` hook clears it. Hooks register a cleanup with `registerPurgeHook(name, fn)` from
 `src/server/services/session-maintenance.ts`; every delete path (single, bulk, retention) calls the
 hooks with the session ids first.
 

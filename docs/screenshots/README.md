@@ -18,6 +18,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-light.png](state-provider-dialog-light.png) | Providers: create dialog (the key field is write-only) (light theme) |
 | ![state-provider-test-result-light.png](state-provider-test-result-light.png) | Providers: test connection result with latency and model count (light theme) |
 | ![state-route-editor-light.png](state-route-editor-light.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (light theme) |
+| ![state-api-reference-light.png](state-api-reference-light.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (light theme) |
 | ![state-chatflow-editor-light.png](state-chatflow-editor-light.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (light theme) |
 | ![state-chatflow-properties-light.png](state-chatflow-properties-light.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (light theme) |
 | ![state-chatflow-publish-light.png](state-chatflow-publish-light.png) | Chatflow editor: publish dialog with validation results and a version note (light theme) |
@@ -63,6 +64,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-dark.png](state-provider-dialog-dark.png) | Providers: create dialog (the key field is write-only) (dark theme) |
 | ![state-provider-test-result-dark.png](state-provider-test-result-dark.png) | Providers: test connection result with latency and model count (dark theme) |
 | ![state-route-editor-dark.png](state-route-editor-dark.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (dark theme) |
+| ![state-api-reference-dark.png](state-api-reference-dark.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (dark theme) |
 | ![state-chatflow-editor-dark.png](state-chatflow-editor-dark.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (dark theme) |
 | ![state-chatflow-properties-dark.png](state-chatflow-properties-dark.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (dark theme) |
 | ![state-chatflow-publish-dark.png](state-chatflow-publish-dark.png) | Chatflow editor: publish dialog with validation results and a version note (dark theme) |
