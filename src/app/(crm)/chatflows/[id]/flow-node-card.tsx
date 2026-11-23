@@ -7,6 +7,7 @@ import {
   GitBranch,
   type LucideIcon,
   MessageSquare,
+  MonitorPlay,
   Play,
   Sparkles,
   Square,
@@ -28,6 +29,7 @@ const icons: Record<NodeType, LucideIcon> = {
   webhook: Webhook,
   memory: Database,
   mcp_tool: Wrench,
+  client_action: MonitorPlay,
   reply: MessageSquare,
   end: Square,
 };

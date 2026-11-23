@@ -72,6 +72,7 @@ const nodeTypes = {
   webhook: FlowNodeCard,
   memory: FlowNodeCard,
   mcp_tool: FlowNodeCard,
+  client_action: FlowNodeCard,
   reply: FlowNodeCard,
   end: FlowNodeCard,
 };
@@ -93,6 +94,9 @@ interface ChatflowEditorProps {
   routes: string[];
   mcpServers: { id: string; name: string; slug: string; enabled: boolean }[];
   mcpTools: McpOption[];
+  media: { id: string; name: string; kind: string; tags: string[] }[];
+  mediaTags: string[];
+  cameras: { id: string; name: string; enabled: boolean }[];
 }
 
 function variableNames(nodes: EditorNode[]): string[] {
@@ -110,7 +114,15 @@ function variableNames(nodes: EditorNode[]): string[] {
 }
 
 /** Visual chatflow editor: palette, canvas, inspector, publish/version dialogs and the test drawer. */
-export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: ChatflowEditorProps) {
+export function ChatflowEditor({
+  initialFlow,
+  routes,
+  mcpServers,
+  mcpTools,
+  media,
+  mediaTags,
+  cameras,
+}: ChatflowEditorProps) {
   const router = useRouter();
   const [flow, setFlow] = useState(initialFlow);
   const [view, setView] = useState<"editor" | "settings">("editor");
@@ -398,6 +410,10 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
       routes={routes}
       mcpServers={mcpServers}
       mcpTools={mcpTools}
+      media={media}
+      cameras={cameras}
+      allowedMediaTags={flow.settings.allowed_media_tags ?? []}
+      allowedCameraIds={flow.settings.allowed_cameras ?? []}
       variables={variables}
       knownNodeIds={knownNodeIds}
       onChange={updateNodeData}
@@ -484,7 +500,13 @@ export function ChatflowEditor({ initialFlow, routes, mcpServers, mcpTools }: Ch
 
         {view === "settings" ? (
           <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
-            <SettingsPanel flow={flow} routes={routes} onSaved={(next) => setFlow(next)} />
+            <SettingsPanel
+              flow={flow}
+              routes={routes}
+              mediaTags={mediaTags}
+              cameras={cameras}
+              onSaved={(next) => setFlow(next)}
+            />
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 gap-3">

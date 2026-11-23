@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { ChevronDown, CircleAlert, CircleCheck, Route } from "lucide-react";
+import { ChevronDown, CircleAlert, CircleCheck, CircleDashed, Route } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatTimestamp } from "@/lib/admin-client";
@@ -12,6 +12,8 @@ function StepRow({ step }: { step: RunTraceStep }) {
     <li className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs first:border-t-0">
       {step.status === "ok" ? (
         <CircleCheck className="size-3.5 text-muted-foreground" />
+      ) : step.status === "skipped" ? (
+        <CircleDashed className="size-3.5 text-muted-foreground" />
       ) : (
         <CircleAlert className="size-3.5 text-destructive" />
       )}
