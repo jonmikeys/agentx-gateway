@@ -52,9 +52,12 @@ function context(
       mcpCall: async () => ({ text: "ok", isError: false }),
       webhookHeaders: async () => ({}),
       memory: createInMemoryMemoryStore(),
+      loadSubflowVersion: async () => undefined,
     },
     emitText: () => {},
     signal: new AbortController().signal,
+    pinnedSubflows: {},
+    depth: 0,
   };
   return { ...base, ...overrides, deps: { ...base.deps, ...overrides.deps } };
 }

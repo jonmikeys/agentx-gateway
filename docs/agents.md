@@ -58,6 +58,9 @@ ends the run as failed.
 | MCP Tool | Calls one allowed tool on a registered MCP server with fixed or templated arguments. |
 | Reply | Streams templated text mid-flow. Several Replies stream in order. |
 | End | Ends the turn. |
+| Subflow Input | Declares the typed parameters (`string | number | boolean | json`) a caller passes. Exactly one per subflow. |
+| Subflow Output | Declares return values and a branch label. One handle per label appears on the caller. |
+| Call Subflow | Runs a pinned published subflow with templated inputs; each Subflow Output label is an output handle, plus an optional `error` handle. |
 
 ### Examples
 
@@ -134,6 +137,101 @@ Memory node: `operation: "append"`, `key: "history"`, `value: "{{input.text}}"` 
 newline-separated log across turns. MCP Tool node: pick the server and one allowed tool; each
 argument value is a template, and JSON-looking values are passed as JSON.
 
+## Subflows
+
+A **subflow** is a reusable flow with declared inputs and outputs. Agents and other subflows call
+it with a Call Subflow node. Subflows never appear in `/v1/agents` or `/v1/models`, and a chat
+request cannot name one as its agent (`400 invalid_agent`).
+
+- The flow kind is `subflow` (the flows table already stores it). Create one with **New subflow**
+  on the Chatflows page; the Agents / Subflows filter narrows the list.
+- A subflow has exactly one **Subflow Input** node and at least one **Subflow Output** node; every
+  path must reach an output. Start and End nodes are not used.
+- A Subflow Output has a **label** (the caller branch) and one or more **return values**. Each
+  return value is a template rendered inside the subflow.
+- A Call Subflow node picks a *published* subflow, maps its required parameters from caller
+  templates, and maps each output label to a caller variable. With one return value the variable
+  holds that value; with several it holds an object keyed by name.
+- The runtime executes the subflow as a nested LangGraph graph: its own `vars` (the mapped
+  inputs), the caller's session memory and conversation, and its Reply nodes stream straight to
+  the client. Client-tool interrupts raised inside propagate to the parent run.
+- The run trace nests the subflow steps under the Call Subflow step (`substeps`).
+
+### Pinning
+
+Publishing a flow records the **currently published version** of every subflow it calls in
+`flow_versions.pinned_subflows`. The parent always runs those pins, so publishing a new subflow
+version changes nothing until the parent is republished. The editor badges a Call Subflow node
+when its subflow has a newer published version ("Update v1 -> v2").
+
+### Validation and usage
+
+Publish-time checks add to the structural rules: the target must be published and be a subflow,
+every required input must be mapped, the configured output labels must match, call cycles are
+rejected (including cycles discovered through published versions) and nesting is limited to five
+levels. Deleting a subflow is blocked with `409 flow_in_use` while a published flow calls it; the
+subflow's Settings tab lists the callers and the versions they pin.
+
+### Example
+
+A subflow with one input, two branches and a return value:
+
+```json
+{
+  "nodes": [
+    { "id": "in", "type": "subflow_input", "position": { "x": 0, "y": 0 },
+      "data": { "title": "Input", "params": [{ "name": "topic", "type": "string", "required": true }] } },
+    { "id": "route", "type": "router", "position": { "x": 260, "y": 0 },
+      "data": { "title": "Known topic?", "mode": "rules",
+        "rules": [{ "id": "known", "label": "Known", "operator": "equals",
+                    "subject": "{{vars.topic}}", "value": "lobby" }],
+        "defaultLabel": "default" } },
+    { "id": "hit", "type": "subflow_output", "position": { "x": 520, "y": -80 },
+      "data": { "title": "Known", "label": "known",
+                "values": [{ "name": "summary", "value": "lobby: {{vars.topic}}" }] } },
+    { "id": "miss", "type": "subflow_output", "position": { "x": 520, "y": 80 },
+      "data": { "title": "Other", "label": "other",
+                "values": [{ "name": "summary", "value": "other: {{vars.topic}}" }] } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "in", "target": "route", "sourceHandle": "out" },
+    { "id": "e2", "source": "route", "target": "hit", "sourceHandle": "known" },
+    { "id": "e3", "source": "route", "target": "miss", "sourceHandle": "default" }
+  ]
+}
+```
+
+Caller node data (`out:known` and `out:other` are the source handles):
+
+```json
+{
+  "title": "Look up topic",
+  "subflowId": "agt_0123456789ab",
+  "subflowName": "Topic lookup",
+  "inputs": [{ "name": "topic", "value": "{{input.text}}" }],
+  "outputs": [
+    { "label": "known", "variable": "known_summary" },
+    { "label": "other", "variable": "other_summary" }
+  ]
+}
+```
+
+```mermaid
+flowchart LR
+    subgraph Caller
+      S[Start] --> C[Call Subflow<br/>pin v2]
+      C -- known --> R1[Reply]
+      C -- other --> R2[Reply]
+      C -. error .-> RE[Recovery]
+    end
+    subgraph Subflow v2
+      I[Subflow Input<br/>topic: string] --> RT{Router}
+      RT -- known --> O1[Subflow Output<br/>label known]
+      RT -- default --> O2[Subflow Output<br/>label other]
+    end
+    C ==>|runs pinned v2| I
+```
+
 ## Templates
 
 `{{input.text}}`, `{{vars.x}}`, `{{memory.x}}`, `{{nodes.<id>.output}}` interpolate dotted paths.
@@ -151,8 +249,9 @@ and prototypes are unreachable, and there is no way to run code. The editor sugg
 
 1. The editor autosaves the draft (last save wins; if another save happened after the copy you
    opened, the API reports a conflict warning but still saves).
-2. **Publish** validates the draft: schema-valid nodes, exactly one Start, every path reaches a
-   Reply/End, no orphan nodes, required fields set, and no cycles except edges marked as loops.
+2. **Publish** validates the draft: schema-valid nodes, exactly one Start (or one Subflow Input
+   for a subflow), every path reaches a Reply/End (or a Subflow Output), no orphan nodes, required
+   fields set, no cycles except edges marked as loops, and the subflow checks described above.
    Problems are returned per node and shown on the cards and in the publish dialog.
 3. Publishing stores the next immutable version with an optional note. Clients pick it up on
    their next request; in-flight sessions keep their agent version.
@@ -203,8 +302,10 @@ sequenceDiagram
 
 ## CRM
 
-- **Chatflows** lists agents with create, duplicate, enable/disable and delete.
-- The **editor** has a left palette (Flow / AI / Actions / Data), a dotted React Flow canvas
+- **Chatflows** lists agents and subflows with an Agents / Subflows filter, create (agent or
+  subflow), duplicate, enable/disable and delete.
+- The **editor** has a left palette (Flow / AI / Actions / Data) filtered by flow kind, a dotted
+  React Flow canvas
   (zoom, minimap, snapping, auto-layout), a right inspector generated from the node schemas,
   undo/redo, copy/paste, multi-select, a problems list and the autosave indicator.
 - The **test drawer** runs the saved draft and shows a live trace; clicking a step highlights
@@ -223,4 +324,7 @@ sequenceDiagram
 | Webhook error on a correct URL | Check the timeout, the response size cap, the retry count and any 4xx. Non-2xx answers take the `error` handle. |
 | Template shows an empty value | The path does not exist yet, or `nodes.<id>.output` refers to a node that has not run on this path. Unknown references are underlined in the editor. |
 | Memory is not visible next turn | Memory is session-scoped: reuse the `X-Session-Id`. Test-drawer runs use an isolated store. |
+| `subflow_not_pinned` at run time | The published agent predates the Call Subflow node; republish the caller to capture the pins. |
+| Call Subflow publish problem | The target is unpublished, is an agent, misses a required input, has output labels that do not match, or the call would cycle / nest too deep. |
+| `409 flow_in_use` when deleting | A published flow still calls the subflow. Republish or delete that caller, or open the subflow's Settings tab to see the usage list. |
 | The canvas looks tiny | Use the fit/minimap controls or the auto-layout button. New flows start with a compact Start → Reply → End skeleton. |
