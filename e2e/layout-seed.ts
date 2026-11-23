@@ -53,7 +53,11 @@ async function seed(admin: APIRequestContext, upstream: MockUpstream) {
       // The mock upstream gets a new port every run, so point reused rows at the current one.
       if (found.base_url !== base_url) {
         const response = await admin.patch(`/api/admin/providers/${found.id}`, {
-          data: { base_url },
+          // A PATCH without capabilities resets them to the defaults, so always resend them.
+          data: {
+            base_url,
+            capabilities: { streaming: true, tools: true, responses_api: Boolean(responsesApi) },
+          },
         });
         expect(response.status()).toBe(200);
       }
@@ -228,6 +232,13 @@ async function seedSessions(admin: APIRequestContext, baseURL: string) {
     ],
     sessionIds.responses,
   );
+  // Both turns must be persisted before the tests assert on the transcript.
+  await expect
+    .poll(async () => {
+      const detail = await (await admin.get(`/api/admin/sessions/${sessionIds.responses}`)).json();
+      return detail.turn_count ?? 0;
+    })
+    .toBe(2);
 
   sessionIds.ended = await chat("layout-qa-ended", [{ role: "user", content: "Bye." }]);
   // Requests persist asynchronously; ending too early would race the transcript write.
