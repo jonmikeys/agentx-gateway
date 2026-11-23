@@ -55,10 +55,23 @@ export class BasicAdminAuth implements AdminAuth {
   }
 }
 
-/** Best-effort client IP. Behind a reverse proxy (Caddy) `X-Forwarded-For` is set by the proxy. */
+/**
+ * Best-effort client identity for the failed-login limiter.
+ *
+ * The nearest reverse proxy (Caddy) appends — or replaces — the real client address in
+ * `X-Forwarded-For`. Earlier entries are client-supplied, so take the rightmost value.
+ * The app port must not be exposed to untrusted networks: a direct client fully controls
+ * this header, so it can otherwise choose its own rate-limit bucket.
+ */
 export function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim() || "unknown";
+  if (forwarded) {
+    const addresses = forwarded
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (addresses.length > 0) return addresses[addresses.length - 1];
+  }
   return request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 

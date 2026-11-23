@@ -43,7 +43,7 @@ function writeStoredState(state: OpenState): void {
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { state: sidebarState } = useSidebar();
+  const { state: sidebarState, setOpenMobile } = useSidebar();
   const [openGroups, setOpenGroups] = React.useState<OpenState>({});
   const activeGroupId = findPageLocation(pathname)?.group.id;
 
@@ -117,7 +117,7 @@ export function AppSidebar() {
                             tooltip={page.title}
                             isActive={findPageLocation(pathname)?.page.href === page.href}
                           >
-                            <Link href={page.href}>
+                            <Link href={page.href} onClick={() => setOpenMobile(false)}>
                               <page.icon />
                               <span>{page.title}</span>
                             </Link>
