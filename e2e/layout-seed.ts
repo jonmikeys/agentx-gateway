@@ -1,4 +1,4 @@
-import { type APIRequestContext, expect, request } from "@playwright/test";
+﻿import { type APIRequestContext, expect, request } from "@playwright/test";
 import { makePng } from "../tests/support/media-files";
 import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
 import { type MockMediaServer, startMockMediaServer } from "../tests/support/mock-media-server";
@@ -38,6 +38,9 @@ export const cameraNames = {
 export const mcpServerName =
   "Layout QA MCP server with an extremely long display name that keeps going 123";
 export const CHAT_ROUTE = "layout-qa-failover";
+export const AGENT_FLOW_NAME =
+  "Layout QA agent with an extremely long display name that keeps going and going 123";
+export const AGENT_FLOW_ENV = "LAYOUT_QA_FLOW_ID";
 export const SESSION_IDS_ENV = "LAYOUT_QA_SESSION_IDS";
 
 async function seedMediaAndCameras(admin: APIRequestContext) {
@@ -141,6 +144,7 @@ export interface SessionIds {
   responses: string;
 }
 let mediaServer: MockMediaServer;
+let agentFlowId = "";
 let mjpeg: MockMjpeg;
 let mcp: MockMcp;
 const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
@@ -201,6 +205,82 @@ async function seedMcp(admin: APIRequestContext) {
     });
     expect(response.status()).toBe(200);
   }
+}
+
+async function seedAgent(admin: APIRequestContext) {
+  const flows = ((await (await admin.get("/api/admin/flows")).json()).data ?? []) as {
+    id: string;
+    slug: string;
+    published_version: number | null;
+  }[];
+  let flow = flows.find((entry) => entry.slug === "layout-qa-agent");
+  if (!flow) {
+    const response = await admin.post("/api/admin/flows", {
+      data: {
+        name: AGENT_FLOW_NAME,
+        slug: "layout-qa-agent",
+        description: `Layout QA ${"a chatflow description ".repeat(10)}`,
+        enabled: true,
+      },
+    });
+    expect(response.status()).toBe(201);
+    flow = (await response.json()) as {
+      id: string;
+      slug: string;
+      published_version: number | null;
+    };
+  }
+  const longTitle = `A node title that is long enough to stress the card ${"x".repeat(30)}`;
+  const start = {
+    id: "start_layout",
+    type: "start",
+    position: { x: 0, y: 0 },
+    data: { title: "Start of the layout QA agent" },
+  };
+  const llm = {
+    id: "llm_layout",
+    type: "llm",
+    position: { x: 280, y: 0 },
+    data: {
+      title: longTitle,
+      model: "inherit",
+      systemPrompt: "You are a helpful layout QA assistant. ".repeat(20),
+      history: "full",
+      historyLimit: 10,
+      mcpToolIds: [],
+      outputVariable: "llm_output",
+      stream: true,
+    },
+  };
+  const reply = {
+    id: "reply_layout",
+    type: "reply",
+    position: { x: 560, y: 0 },
+    data: { title: "Reply with a long template", template: "Layout QA says: {{vars.llm_output}}" },
+  };
+  const end = {
+    id: "end_layout",
+    type: "end",
+    position: { x: 840, y: 0 },
+    data: { title: "End" },
+  };
+  const graph = {
+    nodes: [start, llm, reply, end],
+    edges: [
+      { id: "e_start_llm", source: start.id, target: llm.id, sourceHandle: "out" },
+      { id: "e_llm_reply", source: llm.id, target: reply.id, sourceHandle: "out" },
+      { id: "e_reply_end", source: reply.id, target: end.id, sourceHandle: "out" },
+    ],
+  };
+  const drafted = await admin.put(`/api/admin/flows/${flow.id}/draft`, { data: { graph } });
+  expect(drafted.status()).toBe(200);
+  if (flow.published_version === null) {
+    const published = await admin.post(`/api/admin/flows/${flow.id}/publish`, {
+      data: { note: "Layout QA version" },
+    });
+    expect(published.status()).toBe(201);
+  }
+  agentFlowId = flow.id;
 }
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
@@ -427,6 +507,7 @@ export default async function globalSetup() {
   const admin = await request.newContext({ baseURL, httpCredentials: { username, password } });
   try {
     await seed(admin, upstream);
+    await seedAgent(admin);
     await seedMcp(admin);
     await seedMediaAndCameras(admin);
     await seedSessions(admin, baseURL);
@@ -434,6 +515,7 @@ export default async function globalSetup() {
     await admin.dispose();
   }
   process.env[SESSION_IDS_ENV] = JSON.stringify(sessionIds);
+  process.env[AGENT_FLOW_ENV] = agentFlowId;
   return async () => {
     await upstream.close();
     await mediaServer.close();

@@ -18,6 +18,12 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-light.png](state-provider-dialog-light.png) | Providers: create dialog (the key field is write-only) (light theme) |
 | ![state-provider-test-result-light.png](state-provider-test-result-light.png) | Providers: test connection result with latency and model count (light theme) |
 | ![state-route-editor-light.png](state-route-editor-light.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (light theme) |
+| ![state-chatflow-editor-light.png](state-chatflow-editor-light.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (light theme) |
+| ![state-chatflow-properties-light.png](state-chatflow-properties-light.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (light theme) |
+| ![state-chatflow-publish-light.png](state-chatflow-publish-light.png) | Chatflow editor: publish dialog with validation results and a version note (light theme) |
+| ![state-chatflow-versions-light.png](state-chatflow-versions-light.png) | Chatflow editor: version history with a published version preview and restore (light theme) |
+| ![state-chatflow-test-trace-light.png](state-chatflow-test-trace-light.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (light theme) |
+| ![state-session-agent-run-light.png](state-session-agent-run-light.png) | Session transcript: an agent turn with its per-node run trace and session memory (light theme) |
 | ![state-api-key-created-light.png](state-api-key-created-light.png) | API Keys: the full key is shown exactly once, with a copy button (light theme) |
 | ![state-session-detail-light.png](state-session-detail-light.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (light theme) |
 | ![state-session-detail-full-light.png](state-session-detail-full-light.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (light theme) |
@@ -25,7 +31,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-mcp-tools-light.png](state-session-mcp-tools-light.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (light theme) |
 | ![state-mcp-server-dialog-light.png](state-mcp-server-dialog-light.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (light theme) |
 | ![state-mcp-tools-browser-light.png](state-mcp-tools-browser-light.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (light theme) |
-| ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (light theme) |
+| ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (light theme) |
 | ![state-session-failover-light.png](state-session-failover-light.png) | Session transcript: the failover popover lists every provider attempt and its outcome (light theme) |
 | ![state-session-ended-light.png](state-session-ended-light.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (light theme) |
 | ![state-sessions-search-light.png](state-sessions-search-light.png) | Sessions: full-text search for "sunset" (light theme) |
@@ -49,6 +55,12 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-dark.png](state-provider-dialog-dark.png) | Providers: create dialog (the key field is write-only) (dark theme) |
 | ![state-provider-test-result-dark.png](state-provider-test-result-dark.png) | Providers: test connection result with latency and model count (dark theme) |
 | ![state-route-editor-dark.png](state-route-editor-dark.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (dark theme) |
+| ![state-chatflow-editor-dark.png](state-chatflow-editor-dark.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (dark theme) |
+| ![state-chatflow-properties-dark.png](state-chatflow-properties-dark.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (dark theme) |
+| ![state-chatflow-publish-dark.png](state-chatflow-publish-dark.png) | Chatflow editor: publish dialog with validation results and a version note (dark theme) |
+| ![state-chatflow-versions-dark.png](state-chatflow-versions-dark.png) | Chatflow editor: version history with a published version preview and restore (dark theme) |
+| ![state-chatflow-test-trace-dark.png](state-chatflow-test-trace-dark.png) | Chatflow editor: test drawer running the draft with the per-node trace (click a step to highlight its node) (dark theme) |
+| ![state-session-agent-run-dark.png](state-session-agent-run-dark.png) | Session transcript: an agent turn with its per-node run trace and session memory (dark theme) |
 | ![state-api-key-created-dark.png](state-api-key-created-dark.png) | API Keys: the full key is shown exactly once, with a copy button (dark theme) |
 | ![state-session-detail-dark.png](state-session-detail-dark.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (dark theme) |
 | ![state-session-detail-full-dark.png](state-session-detail-full-dark.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (dark theme) |
@@ -56,7 +68,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-mcp-tools-dark.png](state-session-mcp-tools-dark.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (dark theme) |
 | ![state-mcp-server-dialog-dark.png](state-mcp-server-dialog-dark.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (dark theme) |
 | ![state-mcp-tools-browser-dark.png](state-mcp-tools-browser-dark.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (dark theme) |
-| ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (dark theme) |
+| ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (dark theme) |
 | ![state-session-failover-dark.png](state-session-failover-dark.png) | Session transcript: the failover popover lists every provider attempt and its outcome (dark theme) |
 | ![state-session-ended-dark.png](state-session-ended-dark.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (dark theme) |
 | ![state-sessions-search-dark.png](state-sessions-search-dark.png) | Sessions: full-text search for "sunset" (dark theme) |

@@ -424,6 +424,59 @@ export async function listAllowedMcpTools(): Promise<McpToolView[]> {
   return rows.map(({ tool, server }) => toToolView(tool, server));
 }
 
+/**
+ * Runtime resolution for LLM nodes: the selected tool ids that are still allowed on an enabled
+ * server, with a valid exposed name. Unknown/blocked ids are silently dropped by design.
+ */
+export async function resolveMcpToolsByIds(ids: string[]): Promise<ResolvedMcpTool[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const rows = await getDb()
+    .select({ tool: mcpTools, server: mcpServers })
+    .from(mcpTools)
+    .innerJoin(mcpServers, eq(mcpTools.serverId, mcpServers.id))
+    .where(
+      and(inArray(mcpTools.id, unique), eq(mcpTools.allowed, true), eq(mcpServers.enabled, true)),
+    )
+    .orderBy(asc(mcpServers.slug), asc(mcpTools.name));
+  const tools: ResolvedMcpTool[] = [];
+  for (const { tool, server } of rows) {
+    const exposed = validateExposedToolName(server.slug, tool.name);
+    if (!exposed.ok) continue;
+    tools.push({
+      id: tool.id,
+      exposedName: exposed.name,
+      toolName: tool.name,
+      serverSlug: server.slug,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      server: toRuntime(server),
+    });
+  }
+  return tools;
+}
+
+/** Runtime resolution for MCP Tool nodes: one allowed tool on an enabled server. */
+export async function resolveMcpToolForCall(
+  serverId: string,
+  toolName: string,
+): Promise<{ server: McpServerRuntime; toolName: string } | undefined> {
+  const [row] = await getDb()
+    .select({ tool: mcpTools, server: mcpServers })
+    .from(mcpTools)
+    .innerJoin(mcpServers, eq(mcpTools.serverId, mcpServers.id))
+    .where(
+      and(
+        eq(mcpTools.serverId, serverId),
+        eq(mcpTools.name, toolName),
+        eq(mcpTools.allowed, true),
+        eq(mcpServers.enabled, true),
+      ),
+    );
+  if (!row) return undefined;
+  return { server: toRuntime(row.server), toolName: row.tool.name };
+}
+
 export async function routeSlugExists(routeId: string): Promise<string> {
   const [row] = await getDb()
     .select({ slug: modelRoutes.slug })

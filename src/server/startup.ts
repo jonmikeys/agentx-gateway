@@ -1,3 +1,4 @@
+import { registerAgentPurgeHooks } from "@/server/agents/purge";
 import { runMigrations } from "@/server/db/migrate";
 import { EnvValidationError, getEnv, getPlainHttpWarning } from "@/server/env";
 import { logger } from "@/server/logger";
@@ -11,6 +12,7 @@ export async function startup(): Promise<void> {
     if (warning) logger.warn(warning);
     await runMigrations(env.DATABASE_URL);
     logger.info("Database migrations applied");
+    registerAgentPurgeHooks();
     startMaintenanceScheduler();
   } catch (error) {
     if (error instanceof EnvValidationError) {
