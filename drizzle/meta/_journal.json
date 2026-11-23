@@ -36,6 +36,13 @@
       "when": 1795368882358,
       "tag": "0004_typical_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795402531154,
+      "tag": "0005_strange_kang",
+      "breakpoints": true
     }
   ]
 }

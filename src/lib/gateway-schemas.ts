@@ -65,9 +65,46 @@ export const routeWriteSchema = z.object({
   description: z.string().trim().max(500).default(""),
   enabled: z.boolean().default(true),
   steps: z.array(routeStepSchema).min(1, "Add at least one step").max(10),
+  /** Allowed MCP tools offered on this route. Only tools that are allowed globally are used. */
+  mcp_tool_ids: z.array(z.uuid()).max(200).default([]),
 });
 
 export type RouteWriteInput = z.infer<typeof routeWriteSchema>;
+
+const mcpUrlSchema = z
+  .string()
+  .trim()
+  .min(1, "URL is required")
+  .refine(
+    (value) => URL.canParse(value) && /^https?:/i.test(value),
+    "Must be an absolute http(s) URL such as https://mcp.example.com/mcp",
+  );
+
+export const mcpTransportSchema = z.enum(["streamable_http", "sse"]);
+
+export const mcpServerCreateSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(80),
+  slug: slugSchema.max(40, "Keep the slug short: it prefixes every tool name"),
+  url: mcpUrlSchema,
+  transport: mcpTransportSchema.default("streamable_http"),
+  /** Write-only; omitted keeps the stored value, null clears it. */
+  headers: headersSchema.nullish(),
+  enabled: z.boolean().default(true),
+});
+
+export const mcpServerUpdateSchema = z.object({
+  name: mcpServerCreateSchema.shape.name.optional(),
+  slug: mcpServerCreateSchema.shape.slug.optional(),
+  url: mcpUrlSchema.optional(),
+  transport: mcpTransportSchema.optional(),
+  headers: mcpServerCreateSchema.shape.headers,
+  enabled: z.boolean().optional(),
+});
+
+export const mcpToolAllowedSchema = z.object({ allowed: z.boolean() });
+
+export type McpServerCreateInput = z.infer<typeof mcpServerCreateSchema>;
+export type McpServerUpdateInput = z.infer<typeof mcpServerUpdateSchema>;
 
 const allowlistSchema = z
   .array(z.string().trim().min(1))

@@ -64,6 +64,77 @@ export const modelRoutes = pgTable(
   ],
 );
 
+export type McpTransport = "streamable_http" | "sse";
+
+/**
+ * External MCP servers (docs/mcp.md). `headers` is an encrypted JSON `Record<string,string>`
+ * (for example Composio's `x-api-key` and `x-user-id`); `slug` prefixes every exposed tool name.
+ */
+export const mcpServers = pgTable("mcp_servers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  slug: text("slug").notNull().unique(),
+  url: text("url").notNull(),
+  transport: text("transport").$type<McpTransport>().notNull().default("streamable_http"),
+  /** Encrypted JSON string of `Record<string, string>`; null when none. */
+  headers: text("headers"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Tools reported by `tools/list`; only `allowed` ones are offered to models. */
+export const mcpTools = pgTable(
+  "mcp_tools",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    serverId: uuid("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    inputSchema: jsonb("input_schema").$type<unknown>().notNull().default({}),
+    allowed: boolean("allowed").notNull().default(false),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("mcp_tools_server_name_idx").on(table.serverId, table.name)],
+);
+
+/** Route -> allowed MCP tool selection (a subset of `mcp_tools.allowed`). */
+export const routeMcpTools = pgTable(
+  "route_mcp_tools",
+  {
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => modelRoutes.id, { onDelete: "cascade" }),
+    mcpToolId: uuid("mcp_tool_id")
+      .notNull()
+      .references(() => mcpTools.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.routeId, table.mcpToolId] })],
+);
+
+/**
+ * Mixed client/MCP tool rounds. When one model reply asks for both Unity and MCP tools the
+ * gateway answers the client with only the Unity calls, stores the MCP assistant/tool messages
+ * here, and re-injects them when the client sends its tool results back.
+ */
+export const mcpPendingMessages = pgTable(
+  "mcp_pending_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    /** Client-side tool call ids from the same assistant reply; the trigger for re-injection. */
+    clientToolCallIds: text("client_tool_call_ids").array().notNull().default(sql`'{}'::text[]`),
+    /** Chat-format assistant message with the MCP calls plus the matching tool result messages. */
+    messages: jsonb("messages").$type<unknown[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("mcp_pending_messages_session_idx").on(table.sessionId)],
+);
+
 export const routeSteps = pgTable(
   "route_steps",
   {
@@ -204,6 +275,8 @@ export const transcriptItems = pgTable(
     toolName: text("tool_name"),
     toolArgs: jsonb("tool_args").$type<unknown>(),
     toolSource: text("tool_source").$type<"client" | "mcp">(),
+    /** How long an MCP tool call took; null for client tools (the UI derives those from timestamps). */
+    durationMs: integer("duration_ms"),
     llmRequestId: uuid("llm_request_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     search: tsvector("search").generatedAlwaysAs(sql`to_tsvector('english', content)`),

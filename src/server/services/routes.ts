@@ -1,8 +1,14 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import type { RouteWriteInput } from "@/lib/gateway-schemas";
 import { getDb } from "@/server/db/client";
-import { modelRoutes, providers, routeSteps } from "@/server/db/schema";
+import { modelRoutes, providers, routeMcpTools, routeSteps } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/errors";
+import {
+  assertMcpToolsAllowed,
+  type ResolvedMcpTool,
+  resolveRouteMcpTools,
+  routeMcpToolIds,
+} from "@/server/services/mcp";
 import { type ProviderRuntime, toProviderRuntime } from "@/server/services/providers";
 
 export interface RouteStepView {
@@ -20,6 +26,8 @@ export interface RouteView {
   enabled: boolean;
   is_default: boolean;
   steps: RouteStepView[];
+  /** Selected MCP tools (ids from `mcp_tools`). */
+  mcp_tool_ids: string[];
   created_at: string;
   updated_at: string;
 }
@@ -32,7 +40,10 @@ export interface ResolvedStep {
 
 export interface ResolvedRoute {
   slug: string;
+  id: string;
   steps: ResolvedStep[];
+  /** Allowed MCP tools offered on this route; empty when the route has none. */
+  mcpTools: ResolvedMcpTool[];
 }
 
 type RouteRow = typeof modelRoutes.$inferSelect;
@@ -67,7 +78,7 @@ async function loadStepViews(routeIds: string[]): Promise<Map<string, RouteStepV
   return map;
 }
 
-function toView(row: RouteRow, steps: RouteStepView[]): RouteView {
+function toView(row: RouteRow, steps: RouteStepView[], mcpToolIds: string[]): RouteView {
   return {
     id: row.id,
     slug: row.slug,
@@ -75,6 +86,7 @@ function toView(row: RouteRow, steps: RouteStepView[]): RouteView {
     enabled: row.enabled,
     is_default: row.isDefault,
     steps,
+    mcp_tool_ids: mcpToolIds,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -82,15 +94,16 @@ function toView(row: RouteRow, steps: RouteStepView[]): RouteView {
 
 export async function listRoutes(): Promise<RouteView[]> {
   const rows = await getDb().select().from(modelRoutes).orderBy(asc(modelRoutes.slug));
-  const steps = await loadStepViews(rows.map((row) => row.id));
-  return rows.map((row) => toView(row, steps.get(row.id) ?? []));
+  const ids = rows.map((row) => row.id);
+  const [steps, mcpIds] = await Promise.all([loadStepViews(ids), routeMcpToolIds(ids)]);
+  return rows.map((row) => toView(row, steps.get(row.id) ?? [], mcpIds.get(row.id) ?? []));
 }
 
 export async function getRoute(id: string): Promise<RouteView> {
   const [row] = await getDb().select().from(modelRoutes).where(eq(modelRoutes.id, id));
   if (!row) throw new ServiceError(404, "route_not_found", "Route not found");
-  const steps = await loadStepViews([row.id]);
-  return toView(row, steps.get(row.id) ?? []);
+  const [steps, mcpIds] = await Promise.all([loadStepViews([row.id]), routeMcpToolIds([row.id])]);
+  return toView(row, steps.get(row.id) ?? [], mcpIds.get(row.id) ?? []);
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -112,6 +125,7 @@ async function assertProvidersExist(providerIds: string[]): Promise<void> {
 
 export async function createRoute(input: RouteWriteInput): Promise<RouteView> {
   await assertProvidersExist(input.steps.map((step) => step.provider_id));
+  await assertMcpToolsAllowed(input.mcp_tool_ids);
   try {
     const id = await getDb().transaction(async (tx) => {
       const existing = await tx.select({ id: modelRoutes.id }).from(modelRoutes).limit(1);
@@ -126,6 +140,12 @@ export async function createRoute(input: RouteWriteInput): Promise<RouteView> {
         })
         .returning();
       await tx.insert(routeSteps).values(stepValues(row.id, input));
+      const toolIds = [...new Set(input.mcp_tool_ids)];
+      if (toolIds.length > 0) {
+        await tx
+          .insert(routeMcpTools)
+          .values(toolIds.map((mcpToolId) => ({ routeId: row.id, mcpToolId })));
+      }
       return row.id;
     });
     return await getRoute(id);
@@ -154,6 +174,7 @@ export async function updateRoute(id: string, input: RouteWriteInput): Promise<R
     throw new ServiceError(409, "default_route_disabled", "Choose another default route first");
   }
   await assertProvidersExist(input.steps.map((step) => step.provider_id));
+  await assertMcpToolsAllowed(input.mcp_tool_ids);
   try {
     await getDb().transaction(async (tx) => {
       await tx
@@ -167,6 +188,13 @@ export async function updateRoute(id: string, input: RouteWriteInput): Promise<R
         .where(eq(modelRoutes.id, id));
       await tx.delete(routeSteps).where(eq(routeSteps.routeId, id));
       await tx.insert(routeSteps).values(stepValues(id, input));
+      await tx.delete(routeMcpTools).where(eq(routeMcpTools.routeId, id));
+      const toolIds = [...new Set(input.mcp_tool_ids)];
+      if (toolIds.length > 0) {
+        await tx
+          .insert(routeMcpTools)
+          .values(toolIds.map((mcpToolId) => ({ routeId: id, mcpToolId })));
+      }
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -241,10 +269,12 @@ export async function resolveRoute(selector: RouteSelector): Promise<ResolvedRou
     .orderBy(asc(routeSteps.position));
   return {
     slug: route.slug,
+    id: route.id,
     steps: rows.map(({ step, provider }) => ({
       provider: toProviderRuntime(provider),
       upstreamModel: step.upstreamModel,
       timeoutMs: step.timeoutMs,
     })),
+    mcpTools: await resolveRouteMcpTools(route.id),
   };
 }

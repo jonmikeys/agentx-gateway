@@ -26,6 +26,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^7.0.8",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@tanstack/react-table": "^8.21.3",
     "busboy": "^1.6.0",
     "class-variance-authority": "^0.7.1",

@@ -91,15 +91,19 @@ function ToolCallCard({
   call: TranscriptItemView;
   result: TranscriptItemView | undefined;
 }) {
-  const duration = result
-    ? new Date(result.created_at).getTime() - new Date(call.created_at).getTime()
-    : undefined;
+  const duration =
+    result?.duration_ms ??
+    (result
+      ? new Date(result.created_at).getTime() - new Date(call.created_at).getTime()
+      : undefined);
+  const failed = result?.tool_source === "mcp" && result.content.startsWith("Error:");
   return (
     <div className="max-w-[85%] overflow-hidden rounded-lg border bg-card text-card-foreground">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <Wrench className="size-4 text-muted-foreground" />
         <span className="font-mono text-sm font-medium">{call.tool_name ?? "unknown tool"}</span>
         <Badge variant="outline">{call.tool_source === "mcp" ? "MCP" : "Unity"}</Badge>
+        {failed && <Badge variant="destructive">Error</Badge>}
         {duration !== undefined && duration >= 0 && (
           <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <Timer className="size-3" />
@@ -114,7 +118,9 @@ function ToolCallCard({
             {prettyJson(call.tool_args)}
           </pre>
         </div>
-        <div className="rounded-md border border-dashed p-2">
+        <div
+          className={`rounded-md border border-dashed p-2 ${failed ? "border-destructive/40 bg-destructive/5" : ""}`}
+        >
           <div className="mb-1 text-xs font-medium text-muted-foreground">Result</div>
           {result ? (
             <pre className="overflow-x-auto font-mono text-xs break-words whitespace-pre-wrap">

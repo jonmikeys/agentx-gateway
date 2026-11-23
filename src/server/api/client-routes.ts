@@ -135,6 +135,7 @@ async function runRequest(
     route,
     clientSignal: c.req.raw.signal,
     responseHeaders: { [SESSION_HEADER]: session.sessionId },
+    sessionId: session.sessionId,
     onComplete,
   });
 }
@@ -206,10 +207,11 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
     let chatBody: Record<string, unknown> | undefined;
     try {
       messages = normalizeResponsesInput(body);
-      // Only routes with a translated step need a chat request; this also rejects what chat cannot express.
-      const needsTranslation = route.steps.some(
-        (step) => upstreamApiFor("responses", step) === "chat",
-      );
+      // MCP routes always call Chat Completions internally; other routes only translate when a
+      // step is not a native Responses provider. This also rejects what chat cannot express.
+      const needsTranslation =
+        route.mcpTools.length > 0 ||
+        route.steps.some((step) => upstreamApiFor("responses", step) === "chat");
       if (needsTranslation) chatBody = buildChatRequest(body, messages);
     } catch (error) {
       if (error instanceof TranslationError) {

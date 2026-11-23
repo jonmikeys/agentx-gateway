@@ -19,4 +19,5 @@ export const encryptedColumns: EncryptedColumn[] = [
   { table: "providers", column: "api_key", primaryKey: ["id"] },
   { table: "providers", column: "extra_headers", primaryKey: ["id"] },
   { table: "cameras", column: "credentials", primaryKey: ["id"] },
+  { table: "mcp_servers", column: "headers", primaryKey: ["id"] },
 ];
