@@ -74,8 +74,11 @@ behind a reverse proxy the client IP comes from `X-Forwarded-For`, which Caddy s
 format `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM, random 12-byte IV). To rotate:
 
 ```bash
-NEW_GATEWAY_ENCRYPTION_KEY=$(pnpm -s secrets:genkey) pnpm secrets:rotate
-# then set GATEWAY_ENCRYPTION_KEY to the new key and restart
+# Generate the replacement key and save it somewhere safe first: rotation never prints it.
+export NEW_GATEWAY_ENCRYPTION_KEY="$(pnpm -s secrets:genkey)"
+echo "$NEW_GATEWAY_ENCRYPTION_KEY"
+pnpm secrets:rotate
+# then set GATEWAY_ENCRYPTION_KEY to that saved value and restart
 ```
 
 Rotation re-encrypts every column in the registry inside one transaction. Take a `pg_dump`
@@ -93,7 +96,9 @@ backup first, and keep the new key somewhere safe: without it secrets are unreco
 Run the e2e tests against a built app:
 
 ```bash
-pnpm build && pnpm start &
+pnpm build
+pnpm start &
+until curl -fsS http://localhost:3000/health >/dev/null; do sleep 1; done
 E2E_ADMIN_USERNAME=<ADMIN_USERNAME> E2E_ADMIN_PASSWORD=<ADMIN_PASSWORD> pnpm test:e2e
 ```
 
