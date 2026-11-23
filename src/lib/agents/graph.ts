@@ -17,9 +17,21 @@ export const NODE_TYPES = [
   "mcp_tool",
   "reply",
   "end",
+  "note",
+  "group",
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
+
+/** Canvas-only node types: versioned/exported but never validated or executed (spec §14). */
+export const CANVAS_NODE_TYPES = ["note", "group"] as const;
+
+export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
+
+/** True for nodes the runtime executes (everything except sticky notes and visual groups). */
+export function isExecutableNode(node: { type: string }): boolean {
+  return !(CANVAS_NODE_TYPES as readonly string[]).includes(node.type);
+}
 
 export type FlowKind = "agent" | "subflow";
 
@@ -39,7 +51,32 @@ const variableNameSchema = z
 const common = {
   title: z.string().trim().min(1, "Title is required").max(120),
   comment: z.string().max(4000).optional(),
+  /** When the comment last changed; drives the "last edited" label on the node badge. */
+  commentUpdatedAt: z.string().max(40).optional(),
 };
+
+/** Sticky-note colours; rendered from theme tokens only (see globals.css). */
+export const NOTE_COLORS = ["yellow", "blue", "green", "pink", "grey"] as const;
+export type NoteColor = (typeof NOTE_COLORS)[number];
+export const noteColorSchema = z.enum(NOTE_COLORS);
+
+export const noteNodeDataSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(120).default("Note"),
+  /** Safe Markdown; rendered without raw HTML. */
+  markdown: z.string().max(20_000).default(""),
+  color: noteColorSchema.default("yellow"),
+  comment: z.string().max(4000).optional(),
+  commentUpdatedAt: z.string().max(40).optional(),
+});
+
+export const groupNodeDataSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(120).default("Group"),
+  color: noteColorSchema.default("grey"),
+  /** Collapsed groups show one box and hide their children on the canvas. */
+  collapsed: z.boolean().default(false),
+  comment: z.string().max(4000).optional(),
+  commentUpdatedAt: z.string().max(40).optional(),
+});
 
 const templateString = (max: number) => z.string().max(max).default("");
 
@@ -169,6 +206,13 @@ export const endNodeDataSchema = z.object({ ...common });
 const nodeBase = {
   id: z.string().trim().min(1).max(80),
   position: positionSchema,
+  /** React Flow parent id for nodes wrapped in a visual group. */
+  parentId: z.string().trim().max(80).optional(),
+  /** Persisted canvas size for resizable notes and group frames. */
+  width: z.number().positive().max(10_000).optional(),
+  height: z.number().positive().max(10_000).optional(),
+  /** Layering for canvas-only nodes (notes/groups); execution ignores it. */
+  zIndex: z.number().int().min(-100).max(100).optional(),
 };
 
 export const flowNodeSchema = z.discriminatedUnion("type", [
@@ -181,6 +225,8 @@ export const flowNodeSchema = z.discriminatedUnion("type", [
   z.object({ ...nodeBase, type: z.literal("mcp_tool"), data: mcpToolNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("reply"), data: replyNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("end"), data: endNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("note"), data: noteNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("group"), data: groupNodeDataSchema }),
 ]);
 
 export const flowEdgeSchema = z.looseObject({
@@ -210,6 +256,8 @@ export type SetVariableNodeData = z.infer<typeof setVariableNodeDataSchema>;
 export type MemoryNodeData = z.infer<typeof memoryNodeDataSchema>;
 export type McpToolNodeData = z.infer<typeof mcpToolNodeDataSchema>;
 export type ReplyNodeData = z.infer<typeof replyNodeDataSchema>;
+export type NoteNodeData = z.infer<typeof noteNodeDataSchema>;
+export type GroupNodeData = z.infer<typeof groupNodeDataSchema>;
 
 /** Node types whose execution can fail and that therefore expose an `error` output handle. */
 export function isFallibleNode(type: NodeType): boolean {
@@ -250,6 +298,8 @@ export function nodeHandles(node: FlowNode): NodeHandle[] {
       ];
     }
     case "end":
+    case "note":
+    case "group":
       return [];
     default:
       return isFallibleNode(node.type)
@@ -269,7 +319,7 @@ export function defaultSourceHandle(node: FlowNode): string | undefined {
 export interface NodeCatalogEntry {
   type: NodeType;
   label: string;
-  group: "Flow" | "AI" | "Actions" | "Data";
+  group: "Flow" | "AI" | "Actions" | "Data" | "Notes";
   description: string;
   defaultData: () => FlowNodeData;
 }
@@ -388,6 +438,13 @@ export const nodeCatalog: NodeCatalogEntry[] = [
       outputVariable: "memory_value",
     }),
   },
+  {
+    type: "note",
+    label: "Note",
+    group: "Notes",
+    description: "A sticky note for editors. Markdown, resizable, never executed.",
+    defaultData: () => ({ title: "Note", markdown: "", color: "yellow" }),
+  },
 ];
 
 export function catalogFor(type: NodeType): NodeCatalogEntry | undefined {
@@ -465,6 +522,12 @@ export function summarizeNode(node: FlowNode): string {
       return node.data.template.replace(/\{\{[^}]*\}\}/g, "…").slice(0, 80) || "Empty reply";
     case "end":
       return "Ends the turn";
+    case "note": {
+      const text = node.data.markdown.replace(/\s+/g, " ").trim();
+      return text ? text.slice(0, 80) : "Empty note";
+    }
+    case "group":
+      return node.data.collapsed ? "Collapsed group" : "Visual group";
   }
 }
 

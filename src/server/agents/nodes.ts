@@ -511,6 +511,10 @@ export async function executeNode(
       return executeReply(node, state, context);
     case "end":
       return { next: "out" };
+    case "note":
+    case "group":
+      // Canvas-only nodes never reach the runtime; the compiler filters them out.
+      return { next: "out" };
   }
 }
 

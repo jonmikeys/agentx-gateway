@@ -1,5 +1,5 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
-import type { FlowGraph, FlowNode } from "@/lib/agents/graph";
+import { type FlowGraph, type FlowNode, isExecutableNode } from "@/lib/agents/graph";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { getCheckpointer } from "@/server/agents/checkpointer";
 import { AgentRuntimeError } from "@/server/agents/llm";
@@ -154,16 +154,18 @@ function buildGraph(graph: FlowGraph) {
     addConditionalEdges(from: string, fn: (state: AgentChannels) => string): void;
     compile(options?: { checkpointer?: unknown }): CompiledAgent;
   };
-  const start = graph.nodes.find((node) => node.type === "start");
+  // Sticky notes and visual groups are canvas-only; the runtime sees a flat executable graph.
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
+  const start = runtimeNodes.find((node) => node.type === "start");
   if (!start) throw new AgentRuntimeError("flow_invalid", "The chatflow has no Start node.");
   // Node ids are user data and may collide with LangGraph state channel names (for example a
   // node called "memory"); prefix every graph node name and map targets back through it.
   const nameOf = (id: string) => `node_${id}`;
 
-  for (const node of graph.nodes) builder.addNode(nameOf(node.id), nodeRunner(node));
+  for (const node of runtimeNodes) builder.addNode(nameOf(node.id), nodeRunner(node));
   builder.addEdge(START, nameOf(start.id));
 
-  for (const node of graph.nodes) {
+  for (const node of runtimeNodes) {
     if (node.type === "end") {
       builder.addEdge(nameOf(node.id), END);
       continue;

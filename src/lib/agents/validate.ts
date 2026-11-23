@@ -2,6 +2,7 @@ import {
   type FlowGraph,
   type FlowNode,
   flowNodeSchema,
+  isExecutableNode,
   type NodeType,
   nodeHandles,
 } from "@/lib/agents/graph";
@@ -59,7 +60,10 @@ function buildAdjacency(graph: FlowGraph): Adjacency {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
     const source = byId.get(edge.source);
-    if (!source) continue;
+    const target = byId.get(edge.target);
+    if (!source || !target) continue;
+    // Notes and groups are purely visual: their edges never take part in validation.
+    if (!isExecutableNode(source) || !isExecutableNode(target)) continue;
     const list = outgoing.get(edge.source) ?? [];
     list.push({
       handle: handleOf(edge, source),
@@ -91,7 +95,8 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
     }
   }
 
-  const starts = graph.nodes.filter((node) => node.type === "start");
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
+  const starts = runtimeNodes.filter((node) => node.type === "start");
   if (starts.length !== 1) {
     problems.push({
       message:
@@ -115,7 +120,7 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
       }
     }
 
-    for (const node of graph.nodes) {
+    for (const node of runtimeNodes) {
       if (node === start) continue;
       if (!reachable.has(node.id)) {
         problems.push({
@@ -126,7 +131,7 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
       }
     }
 
-    for (const node of graph.nodes) {
+    for (const node of runtimeNodes) {
       if (!reachable.has(node.id)) continue;
       const handles = nodeHandles(node);
       for (const handle of handles) {
@@ -171,7 +176,7 @@ function structuralProblems(graph: FlowGraph, adjacency: Adjacency): ValidationP
     visiting.delete(id);
     visited.add(id);
   };
-  for (const node of graph.nodes) visit(node.id);
+  for (const node of runtimeNodes) visit(node.id);
 
   return problems;
 }
