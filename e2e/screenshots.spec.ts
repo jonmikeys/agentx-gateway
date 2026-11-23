@@ -1104,6 +1104,22 @@ for (const theme of themes) {
       );
     });
 
+    test("state: API reference", async ({ page }) => {
+      await page.goto("/docs");
+      await page.waitForLoadState("networkidle");
+      const operation = page.getByRole("heading", { name: "Create a chat completion" });
+      await operation.scrollIntoViewIfNeeded();
+      await expect(operation).toBeInViewport();
+      await page.waitForTimeout(500);
+      await save(
+        page,
+        "state-api-reference",
+        "API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in",
+        false,
+        true,
+      );
+    });
+
     test("state: chatflow editor canvas", async ({ page }) => {
       await page.goto(`/chatflows/${demo.agentFlow}`);
       await expect(page.getByRole("heading", { name: "Lobby greeter", level: 1 })).toBeVisible();
