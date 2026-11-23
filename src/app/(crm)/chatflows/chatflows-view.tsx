@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Bot, Copy, Plus, Trash2 } from "lucide-react";
+import { Bot, Copy, FileJson, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
@@ -34,7 +34,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
+import { parseImportedFlow } from "@/lib/agents/io";
 import type { FlowDetail, FlowSummary } from "@/lib/agents/types";
+import type { ValidationProblem } from "@/lib/agents/validate";
 
 export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
   const router = useRouter();
@@ -45,6 +47,60 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [importProblems, setImportProblems] = useState<ValidationProblem[]>([]);
+  const [imported, setImported] = useState<FlowDetail | undefined>();
+  const [missingSecrets, setMissingSecrets] = useState<string[]>([]);
+
+  function openImport() {
+    setImportText("");
+    setImportErrors([]);
+    setImportProblems([]);
+    setImported(undefined);
+    setMissingSecrets([]);
+    setImporting(true);
+  }
+
+  async function importFlow() {
+    setImportErrors([]);
+    setImportProblems([]);
+    const parsed = parseImportedFlow(importText);
+    if (!parsed.ok) {
+      setImportErrors(parsed.errors);
+      setImportProblems(parsed.problems);
+      return;
+    }
+    setSaving(true);
+    try {
+      const created = await adminFetch<FlowDetail>("flows", {
+        method: "POST",
+        body: {
+          name: parsed.flow.name,
+          description: parsed.flow.description,
+          kind: parsed.flow.kind,
+          settings: parsed.flow.settings,
+          ...(parsed.flow.slug ? { slug: parsed.flow.slug } : {}),
+        },
+      });
+      await adminFetch(`flows/${created.id}/draft`, {
+        method: "PUT",
+        body: { graph: parsed.flow.graph },
+      });
+      setMissingSecrets(parsed.flow.missingSecrets);
+      setImported(created);
+      if (parsed.flow.missingSecrets.length === 0) {
+        toast.success(`Imported ${created.name}`);
+        setImporting(false);
+        router.push(`/chatflows/${created.id}`);
+      }
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function openCreate() {
     setName("");
@@ -222,10 +278,16 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
         title="Chatflows"
         description="Design agents and subflows in the visual chatflow editor."
         action={
-          <Button onClick={openCreate}>
-            <Plus />
-            New chatflow
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={openImport}>
+              <FileJson />
+              Import JSON
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus />
+              New chatflow
+            </Button>
+          </div>
         }
       />
 
@@ -299,6 +361,101 @@ export function ChatflowsView({ flows }: { flows: FlowSummary[] }) {
               {saving ? "Creating…" : "Create chatflow"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importing} onOpenChange={setImporting}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Import chatflow JSON</DialogTitle>
+            <DialogDescription>
+              Creates a new chatflow. Exports never contain secrets; re-link webhook headers after
+              importing.
+            </DialogDescription>
+          </DialogHeader>
+          {imported ? (
+            <div className="space-y-3">
+              <p className="text-sm">
+                Imported <span className="font-medium">{imported.name}</span>.
+              </p>
+              {missingSecrets.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Re-link these webhook headers:</p>
+                  <ul
+                    aria-label="Webhook headers to re-link"
+                    className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-5 text-xs text-muted-foreground"
+                  >
+                    {missingSecrets.map((header) => (
+                      <li key={header}>{header}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No webhook secrets need re-linking.</p>
+              )}
+              <DialogFooter>
+                <Button onClick={() => router.push(`/chatflows/${imported.id}`)}>
+                  Open chatflow
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Input
+                type="file"
+                accept="application/json,.json"
+                aria-label="Import JSON file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  void file
+                    .text()
+                    .then(setImportText)
+                    .catch((error: unknown) => toast.error(errorMessage(error)));
+                }}
+              />
+              <Textarea
+                aria-label="Imported chatflow JSON"
+                rows={10}
+                className="font-mono text-xs"
+                placeholder='{"format":"agentx.chatflow","graph":{"nodes":[],"edges":[]}}'
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+              />
+              {importErrors.length > 0 && (
+                <div role="alert" className="rounded-md border border-destructive/40 p-2 text-xs">
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {importErrors.map((message) => (
+                      <li key={message} className="break-words text-destructive">
+                        {message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importProblems.length > 0 && (
+                <ul className="max-h-32 list-disc space-y-0.5 overflow-y-auto rounded-md border p-2 pl-6 text-xs">
+                  {importProblems.map((problem) => (
+                    <li
+                      key={`${problem.nodeId ?? "flow"}-${problem.message}`}
+                      className="break-words"
+                    >
+                      {problem.nodeTitle ? `${problem.nodeTitle}: ` : ""}
+                      {problem.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setImporting(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={importFlow} disabled={saving || !importText.trim()}>
+                  {saving ? "Importing…" : "Import chatflow"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

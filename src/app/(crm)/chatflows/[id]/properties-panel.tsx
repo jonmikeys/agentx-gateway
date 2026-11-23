@@ -17,14 +17,17 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type {
-  LlmNodeData,
-  McpToolNodeData,
-  MemoryNodeData,
-  ReplyNodeData,
-  RouterNodeData,
-  SetVariableNodeData,
-  WebhookNodeData,
+import {
+  type GroupNodeData,
+  type LlmNodeData,
+  type McpToolNodeData,
+  type MemoryNodeData,
+  NOTE_COLORS,
+  type NoteNodeData,
+  type ReplyNodeData,
+  type RouterNodeData,
+  type SetVariableNodeData,
+  type WebhookNodeData,
 } from "@/lib/agents/graph";
 import type { VariableSuggestion } from "@/lib/agents/templates";
 
@@ -157,11 +160,86 @@ export function PropertiesPanel({
           rows={2}
           placeholder="A note for editors (never executed)."
           value={data.comment ?? ""}
-          onChange={(event) => update({ comment: event.target.value })}
+          onChange={(event) =>
+            update({
+              comment: event.target.value,
+              ...(event.target.value.trim() ? { commentUpdatedAt: new Date().toISOString() } : {}),
+            })
+          }
         />
       </Field>
     </>
   );
+
+  if (nodeType === "note") {
+    const note = data as NoteNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        <Field label="Title" id={fieldId("title")}>
+          <Input
+            id={fieldId("title")}
+            value={note.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+        </Field>
+        <Field label="Markdown" id={fieldId("noteMarkdown")}>
+          <Textarea
+            id={fieldId("noteMarkdown")}
+            rows={8}
+            className="font-mono text-xs"
+            placeholder="Write Markdown… raw HTML is shown as text."
+            value={note.markdown}
+            onChange={(event) => update({ markdown: event.target.value })}
+          />
+        </Field>
+        <Field label="Colour" id={fieldId("noteColor")}>
+          <Select value={note.color} onValueChange={(value) => update({ color: value })}>
+            <SelectTrigger id={fieldId("noteColor")} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {NOTE_COLORS.map((colour) => (
+                <SelectItem key={colour} value={colour}>
+                  {colour}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <p className="text-xs text-muted-foreground">
+          Canvas only: notes are versioned and exported but never validated or executed.
+        </p>
+      </div>
+    );
+  }
+
+  if (nodeType === "group") {
+    const group = data as GroupNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        <Field label="Title" id={fieldId("title")}>
+          <Input
+            id={fieldId("title")}
+            value={group.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+        </Field>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={fieldId("collapsed")} className="text-xs">
+            Collapsed
+          </Label>
+          <Switch
+            id={fieldId("collapsed")}
+            checked={group.collapsed}
+            onCheckedChange={(checked) => update({ collapsed: checked })}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Purely visual: the compiler and validator ignore groups and run their children normally.
+        </p>
+      </div>
+    );
+  }
 
   if (nodeType === "llm") {
     const llm = data as LlmNodeData;
