@@ -9,7 +9,8 @@ database, encrypted secrets and `/health`. G2 (routing core) adds the OpenAI-com
 `/v1/models` and `/v1/chat/completions` with provider failover. G3 (sessions) adds the
 `X-Session-Id` session contract, transcript capture and the Sessions, Dashboard and Settings
 pages. G4 adds the Responses API, G5 media and cameras, and G6 the MCP registry and tool loop.
-See [docs/spec.md](docs/spec.md) for the agreed design.
+G7a adds the visual chatflow editor and the core agent runtime (published agents, LangGraph,
+session memory and run traces). See [docs/spec.md](docs/spec.md) for the agreed design.
 
 ## Features
 
@@ -35,6 +36,11 @@ See [docs/spec.md](docs/spec.md) for the agreed design.
   tools, and let plain chats call them. The gateway executes MCP calls, loops (max four rounds),
   keeps Unity tools client-side, and re-injects mixed-round MCP messages on the next request.
   See [docs/mcp.md](docs/mcp.md).
+- **Agents (chatflows)** (G7a): design agents in a React Flow editor (Start, LLM, Router,
+  Set Variable, Webhook, Memory, MCP Tool, Reply, End), validate and publish numbered versions,
+  and run them through LangGraph with session memory, streaming replies, checkpointing and a
+  per-node run trace. `GET /v1/agents` lists live agents; requests use `agent_id` or the
+  `agent:<id>` model. See [docs/agents.md](docs/agents.md).
 - **Dashboard** with sessions, turns, tokens, failovers and provider latency.
 - **Request log** (timings, attempts, token usage; never message content).
 - Admin console with Basic auth, dark/light themes and a Ctrl+K command palette

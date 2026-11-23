@@ -249,6 +249,14 @@ while referenced.
 Every production run stores a per-node trace (inputs, outputs, timing, errors), linked
 from the session transcript.
 
+### Implementation notes (G7a)
+Webhook header values are write-only in the editor and stored in `flow_webhook_secrets`
+(AES-256-GCM, one row per flow/node/header, registered in the encrypted-column table) rather
+than inside the graph JSON, so `pnpm secrets:rotate` covers them; the draft and versions keep
+only header names. Client-tool pause/resume, Client Action, subflows, sticky notes, groups,
+node-comment UI and version diff are G7b and have extension points (comment field, flow kind,
+settings arrays, terminal/interrupt-aware runtime).
+
 ## 14. CRM
 
 Sidebar groups (collapsible, state remembered; group of the current page auto-expands;
