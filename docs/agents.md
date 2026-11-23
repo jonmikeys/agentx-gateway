@@ -203,12 +203,34 @@ sequenceDiagram
 
 ## CRM
 
-- **Chatflows** lists agents with create, duplicate, enable/disable and delete.
-- The **editor** has a left palette (Flow / AI / Actions / Data), a dotted React Flow canvas
-  (zoom, minimap, snapping, auto-layout), a right inspector generated from the node schemas,
-  undo/redo, copy/paste, multi-select, a problems list and the autosave indicator.
+- **Chatflows** lists agents with create, duplicate, JSON import, enable/disable and delete.
+- The **editor** has a left palette (Flow / AI / Actions / Data / Notes), a dotted React Flow
+  canvas (zoom, minimap, snapping, auto-layout, fit), a right inspector generated from the node
+  schemas, undo/redo, copy/paste, multi-select, a problems list and the autosave indicator.
+- **Sticky notes** are canvas-only Markdown nodes (raw HTML is escaped, never rendered). They are
+  resizable, edited by double-clicking, use theme-token colours (yellow, blue, green, pink, grey),
+  layer with Bring forward / Send backward, and are versioned and exported. The validator and the
+  compiler ignore them.
+- **Node comments**: every node keeps a comment plus `commentUpdatedAt`. Commented nodes show a
+  speech-bubble badge with a popover (text and last-edited time); edit the text in the inspector.
+- **Visual groups**: select nodes and press `Ctrl+G` (or the toolbar Group button) to wrap them in
+  a titled frame. A group moves as one, can be collapsed to a single box, and can be ungrouped
+  with the toolbar or `Ctrl+Shift+G`. Groups are purely cosmetic: the compiler and validator
+  flatten their children and ignore the frame. The "Convert group to subflow" action is reserved
+  until subflows land.
+- The toolbar eye toggles all sticky notes and comment badges. **Version history** can compare a
+  version with the draft: added, removed and changed nodes (and edges) are highlighted on the
+  canvas with a legend and a summary list; it is view only.
+- **JSON export** writes the draft or a version without secrets (webhook headers keep their names
+  only). **JSON import** creates a new flow, runs the same validation as publish, and lists the
+  webhook headers that need re-linking.
+- Duplicating a chatflow copies the draft (including notes and groups), its settings and its
+  webhook header secrets; the copy starts disabled and unpublished.
 - The **test drawer** runs the saved draft and shows a live trace; clicking a step highlights
   its node and running nodes light up while the run is in progress.
+- **Keyboard shortcuts** (ignored while typing in an input): `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z`
+  or `Ctrl/Cmd+Y` redo, `Ctrl/Cmd+C`/`V` copy and paste, `Ctrl/Cmd+G` group,
+  `Ctrl/Cmd+Shift+G` ungroup, `N` add a sticky note, `Delete`/`Backspace` delete the selection.
 - **Settings** holds the agent name, slug, description, enabled flag and default model route.
 - The **transcript viewer** shows the session's run traces and memory next to the conversation.
 
@@ -223,4 +245,4 @@ sequenceDiagram
 | Webhook error on a correct URL | Check the timeout, the response size cap, the retry count and any 4xx. Non-2xx answers take the `error` handle. |
 | Template shows an empty value | The path does not exist yet, or `nodes.<id>.output` refers to a node that has not run on this path. Unknown references are underlined in the editor. |
 | Memory is not visible next turn | Memory is session-scoped: reuse the `X-Session-Id`. Test-drawer runs use an isolated store. |
-| The canvas looks tiny | Use the fit/minimap controls or the auto-layout button. New flows start with a compact Start → Reply → End skeleton. |
+| The canvas looks tiny | Use the Fit button or the minimap, or auto-layout. The canvas keeps a 0.6× minimum zoom so cards stay readable with the test drawer open. |

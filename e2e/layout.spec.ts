@@ -1,4 +1,4 @@
-﻿import AxeBuilder from "@axe-core/playwright";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
 import { makePng } from "../tests/support/media-files";
@@ -460,42 +460,91 @@ for (const viewport of viewports) {
     });
 
     test("chatflow editor: layout, dialogs and test drawer", async ({ page }) => {
+      test.setTimeout(60_000);
       await openPage(page, `/chatflows/${agentFlowId}`);
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
 
-      const publish = page.getByRole("button", { name: "Publish", exact: true });
-      await publish.click();
-      await expect(page.getByText("Validation passed.")).toBeVisible();
-      await expectNoMojibake(page);
-      await expectDialogContained(page);
-      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog")).toHaveCount(0);
-      await expect(publish).toBeFocused();
+      for (const name of [
+        "Group selected nodes",
+        "Ungroup selected group",
+        "Hide notes and comments",
+        "Fit view",
+        "Export flow as JSON",
+      ]) {
+        await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+      }
 
-      const versions = page.getByRole("button", { name: "Versions", exact: true });
-      await versions.click();
-      await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
-      await expectDialogContained(page);
-      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
-      await page.keyboard.press("Escape");
-      await expect(versions).toBeFocused();
+      await test.step("node comment popover", async () => {
+        // Start node carries a comment in the seed. Dispatch the click so the narrow mobile
+        // viewport (where the node can sit partly outside the canvas) still opens the popover.
+        const comment = page.getByRole("button", { name: "Show comment" }).first();
+        await comment.evaluate((element) => (element as HTMLElement).click());
+        await expect(page.getByText(/Last edited/)).toBeVisible();
+        if (viewport.name === "desktop") {
+          const popover = await page.locator('[data-slot="popover-content"]').boundingBox();
+          expect(popover?.x ?? -1).toBeGreaterThanOrEqual(0);
+          expect((popover?.x ?? 0) + (popover?.width ?? 0)).toBeLessThanOrEqual(viewport.width + 1);
+        }
+        await expectNoSeriousAxeViolations(page, '[data-slot="popover-content"]');
+        await page.keyboard.press("Escape");
+        await expect(comment).toBeFocused();
+      });
 
-      const settings = page.getByRole("button", { name: "Settings", exact: true });
-      await settings.click();
-      await expect(page.getByLabel("Name")).toBeVisible();
-      await expectNoHorizontalScroll(page);
-      await expectNamedControls(page);
-      await settings.click();
+      await test.step("publish dialog", async () => {
+        const publish = page.getByRole("button", { name: "Publish", exact: true });
+        await publish.click();
+        await expect(page.getByText("Validation passed.")).toBeVisible();
+        await expectNoMojibake(page);
+        await expectDialogContained(page);
+        await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(publish).toBeFocused();
+      });
 
-      const openDrawer = page.getByRole("button", { name: "Open test drawer" });
-      await openDrawer.click();
-      await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
-      await expectNoMojibake(page);
-      await expectNoHorizontalScroll(page);
-      await expectNamedControls(page);
-      await page.getByRole("button", { name: "Close test drawer" }).click();
+      await test.step("version diff", async () => {
+        const versions = page.getByRole("button", { name: "Versions", exact: true });
+        await versions.click();
+        await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
+        await page
+          .getByRole("button", { name: /^View version/ })
+          .first()
+          .click();
+        await page.getByRole("button", { name: "Compare with draft" }).click();
+        await expect(page.getByTestId("version-diff")).toBeVisible();
+        await expectDialogContained(page);
+        await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+        await page.keyboard.press("Escape");
+        await expect(versions).toBeFocused();
+      });
+
+      await test.step("hide annotations toggle", async () => {
+        const hide = page.getByRole("button", { name: "Hide notes and comments" });
+        await hide.click();
+        await expect(hide).toHaveAttribute("aria-pressed", "true");
+        await hide.click();
+        await expect(hide).toHaveAttribute("aria-pressed", "false");
+      });
+
+      await test.step("settings view", async () => {
+        const settings = page.getByRole("button", { name: "Settings", exact: true });
+        await settings.click();
+        await expect(page.getByLabel("Name")).toBeVisible();
+        await expectNoHorizontalScroll(page);
+        await expectNamedControls(page);
+        await settings.click();
+      });
+
+      await test.step("test drawer", async () => {
+        const openDrawer = page.getByRole("button", { name: "Open test drawer" });
+        await openDrawer.click();
+        await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
+        await expectNoMojibake(page);
+        await expectNoHorizontalScroll(page);
+        await expectNamedControls(page);
+        await page.getByRole("button", { name: "Close test drawer" }).click();
+      });
     });
 
     for (const theme of themes) {
@@ -507,6 +556,18 @@ for (const viewport of viewports) {
         await expectNoSeriousAxeViolations(page);
       });
     }
+    test("chatflow import dialog stays inside the dialog", async ({ page }) => {
+      await openPage(page, "/chatflows");
+      const importButton = page.getByRole("button", { name: "Import JSON" });
+      await importButton.click();
+      await expect(page.getByRole("heading", { name: "Import chatflow JSON" })).toBeVisible();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(importButton).toBeFocused();
+    });
+
     test("command palette stays inside the dialog", async ({ page }) => {
       await openPage(page, "/");
       await page.getByRole("button", { name: /Search pages/ }).click();
