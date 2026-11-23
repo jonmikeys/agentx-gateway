@@ -1,4 +1,4 @@
-import type { FlowGraph, FlowKind } from "@/lib/agents/graph";
+import type { FlowGraph, FlowKind, SubflowParam } from "@/lib/agents/graph";
 
 /** Agent settings stored in `flows.settings` (spec §14, Agent settings tab). */
 export interface FlowSettings {
@@ -32,6 +32,8 @@ export interface FlowSummary {
 export interface FlowDetail extends FlowSummary {
   draft: FlowGraph;
   version_count: number;
+  /** Pins captured by the current published version (subflow id -> version). */
+  pinned_subflows: Record<string, number>;
 }
 
 export interface FlowVersionSummary {
@@ -44,6 +46,28 @@ export interface FlowVersionSummary {
 
 export interface FlowVersionDetail extends FlowVersionSummary {
   graph: FlowGraph;
+  pinned_subflows: Record<string, number>;
+}
+
+/** One published subflow offered to the Call Subflow picker in the editor. */
+export interface SubflowOption {
+  id: string;
+  name: string;
+  version: number;
+  params: SubflowParam[];
+  outputs: string[];
+}
+
+/** One published caller of a subflow, as shown by the usage view. */
+export interface SubflowUsageEntry {
+  flow_id: string;
+  name: string;
+  kind: FlowKind;
+  /** Version of the calling flow (the published version that references the subflow). */
+  version: number;
+  /** Subflow version pinned by that caller version; null for unpublished drafts. */
+  pinned_version: number | null;
+  published_at: string;
 }
 
 export type RunStepStatus = "ok" | "error" | "skipped";
@@ -58,6 +82,8 @@ export interface RunTraceStep {
   input?: unknown;
   output?: unknown;
   error?: string;
+  /** Nested steps of a Call Subflow node, so subflow work nests under the call. */
+  substeps?: RunTraceStep[];
 }
 
 export interface RunTrace {

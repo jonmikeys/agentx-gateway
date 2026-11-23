@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { FlowGraph } from "@/lib/agents/graph";
 import type { AgentRuntimeEvent, RunTrace, RunTraceStep } from "@/lib/agents/types";
-import { compileAgentGraph } from "@/server/agents/compiler";
+import { compileAgentGraph, compileSubflowGraph } from "@/server/agents/compiler";
 import { withAgentDependencies } from "@/server/agents/deps";
 import { AgentRuntimeError } from "@/server/agents/llm";
 import {
   type AgentDependencies,
   type AgentRunContext,
   computeTerminalLlmNodes,
+  type SubflowRunRequest,
+  type SubflowRunResult,
 } from "@/server/agents/nodes";
 import type { TokenUsage } from "@/server/db/schema";
 import { logger } from "@/server/logger";
@@ -25,6 +27,8 @@ export interface RunAgentOptions {
   /** Route used by `inherit` nodes (the request route or the agent default route). */
   route: ResolvedRoute | undefined;
   signal: AbortSignal;
+  /** Subflow pins of the running version; the top-level agent passes its published pins. */
+  pinnedSubflows?: Record<string, number>;
   deps?: Partial<AgentDependencies>;
   /** Live events for streaming adapters and the CRM test drawer. */
   onEvent?: (event: AgentRuntimeEvent) => void;
@@ -71,6 +75,71 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
   };
 
+  const streamText = (delta: string) => {
+    if (delta) emit({ type: "text", delta });
+  };
+
+  /**
+   * Executes a pinned subflow as a nested LangGraph graph. It gets its own vars (the mapped
+   * inputs), shares the session memory and conversation, streams its Replies to the client and
+   * returns its trace so the call step can nest it. Client-tool interrupts raised inside it
+   * propagate to the parent run.
+   */
+  const runNested = async (request: SubflowRunRequest): Promise<SubflowRunResult> => {
+    const { subflow } = request;
+    const compiled = await compileSubflowGraph(subflow.flowId, subflow.version, subflow.graph);
+    const subContext: AgentRunContext = {
+      flowId: subflow.flowId,
+      version: subflow.version,
+      sessionId: request.sessionId,
+      graph: subflow.graph,
+      inputText: request.inputText,
+      terminalLlmNodes: computeTerminalLlmNodes(subflow.graph),
+      route: options.route,
+      deps,
+      emitText: streamText,
+      signal: options.signal,
+      pinnedSubflows: subflow.pinnedSubflows,
+      depth: request.parent.depth + 1,
+      runSubflow: runNested,
+    };
+    const final = await compiled.invoke(
+      {
+        messages: request.messages,
+        sessionId: request.sessionId,
+        vars: request.inputs,
+        memory: request.memory,
+        output: null,
+        cursor: "out",
+        trace: [],
+        text: "",
+        reasoning: "",
+        usage: undefined,
+        lastError: "",
+        fatal: false,
+        failedNodeId: null,
+        outputLabel: "",
+        subflowOutput: {},
+      },
+      {
+        recursionLimit: 50,
+        configurable: { thread_id: request.sessionId, agentContext: subContext },
+      },
+    );
+    if (final.fatal) {
+      throw new AgentRuntimeError("subflow_failed", final.lastError || "The subflow run failed.");
+    }
+    return {
+      label: final.outputLabel ?? "",
+      values: final.subflowOutput ?? {},
+      memory: final.memory,
+      text: final.text,
+      reasoning: final.reasoning,
+      usage: final.usage,
+      steps: final.trace as RunTraceStep[],
+    };
+  };
+
   try {
     const memory = await deps.memory.load(options.sessionId);
     const context: AgentRunContext = {
@@ -82,9 +151,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       terminalLlmNodes: computeTerminalLlmNodes(options.graph),
       route: options.route,
       deps,
-      emitText: (delta) => {
-        if (delta) emit({ type: "text", delta });
-      },
+      emitText: streamText,
       onNodeStart: (node) =>
         emit({ type: "node_start", nodeId: node.id, nodeType: node.type, title: node.data.title }),
       onNodeEnd: (step) =>
@@ -96,6 +163,9 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
           error: step.error,
         }),
       signal: options.signal,
+      pinnedSubflows: options.pinnedSubflows ?? {},
+      depth: 0,
+      runSubflow: runNested,
     };
 
     const compiled = await compileAgentGraph(options.flowId, options.version, options.graph);
@@ -114,6 +184,8 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         lastError: "",
         fatal: false,
         failedNodeId: null,
+        outputLabel: "",
+        subflowOutput: {},
       },
       {
         recursionLimit: 50,

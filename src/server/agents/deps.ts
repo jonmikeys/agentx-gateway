@@ -1,7 +1,7 @@
 import { databaseMemoryStore } from "@/server/agents/memory";
 import type { AgentDependencies } from "@/server/agents/nodes";
 import { callMcpTool } from "@/server/gateway/mcp-client";
-import { webhookHeaderValues } from "@/server/services/agents";
+import { loadSubflowVersion, webhookHeaderValues } from "@/server/services/agents";
 import { resolveMcpToolForCall, resolveMcpToolsByIds } from "@/server/services/mcp";
 import { resolveRoute } from "@/server/services/routes";
 
@@ -18,6 +18,7 @@ export const defaultAgentDependencies: AgentDependencies = {
   },
   webhookHeaders: webhookHeaderValues,
   memory: databaseMemoryStore,
+  loadSubflowVersion,
 };
 
 export function withAgentDependencies(

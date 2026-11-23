@@ -43,6 +43,13 @@ const AgentAnnotation = Annotation.Root({
     reducer: (_previous, next) => next,
     default: () => null,
   }),
+  /** Subflow runs only: the Subflow Output label that ended the run. */
+  outputLabel: Annotation<string>({ reducer: (_previous, next) => next, default: () => "" }),
+  /** Subflow runs only: the return values of the reached Subflow Output. */
+  subflowOutput: Annotation<Record<string, unknown>>({
+    reducer: (_previous, next) => next,
+    default: () => ({}),
+  }),
 });
 
 type AgentChannels = typeof AgentAnnotation.State;
@@ -102,6 +109,7 @@ function nodeRunner(node: FlowNode) {
           vars: outcome.vars,
           output: outcome.output,
         }),
+        ...(outcome.steps && outcome.steps.length > 0 ? { substeps: outcome.steps } : {}),
       };
       context.onNodeEnd?.(step);
       return {
@@ -114,6 +122,12 @@ function nodeRunner(node: FlowNode) {
         reasoning: outcome.reasoning ? state.reasoning + outcome.reasoning : state.reasoning,
         usage: addUsage(state.usage, outcome.usage),
         lastError: "",
+        ...(outcome.subflowOutput
+          ? {
+              outputLabel: outcome.subflowOutput.label,
+              subflowOutput: outcome.subflowOutput.values,
+            }
+          : {}),
       };
     } catch (error) {
       const durationMs = Math.round(performance.now() - startedMs);
@@ -154,8 +168,15 @@ function buildGraph(graph: FlowGraph) {
     addConditionalEdges(from: string, fn: (state: AgentChannels) => string): void;
     compile(options?: { checkpointer?: unknown }): CompiledAgent;
   };
-  const start = graph.nodes.find((node) => node.type === "start");
-  if (!start) throw new AgentRuntimeError("flow_invalid", "The chatflow has no Start node.");
+  const start =
+    graph.nodes.find((node) => node.type === "start") ??
+    graph.nodes.find((node) => node.type === "subflow_input");
+  if (!start) {
+    throw new AgentRuntimeError(
+      "flow_invalid",
+      "The chatflow has no Start (agent) or Subflow Input (subflow) node.",
+    );
+  }
   // Node ids are user data and may collide with LangGraph state channel names (for example a
   // node called "memory"); prefix every graph node name and map targets back through it.
   const nameOf = (id: string) => `node_${id}`;
@@ -164,7 +185,7 @@ function buildGraph(graph: FlowGraph) {
   builder.addEdge(START, nameOf(start.id));
 
   for (const node of graph.nodes) {
-    if (node.type === "end") {
+    if (node.type === "end" || node.type === "subflow_output") {
       builder.addEdge(nameOf(node.id), END);
       continue;
     }
@@ -191,7 +212,7 @@ export async function compileAgentGraph(
   version: number,
   graph: FlowGraph,
 ): Promise<CompiledAgent> {
-  const key = `${flowId}@${version}`;
+  const key = `agent:${flowId}@${version}`;
   const cached = cache.get(key);
   if (cached) return cached;
 
@@ -200,6 +221,26 @@ export async function compileAgentGraph(
   const compiled = (checkpointer
     ? builder.compile({ checkpointer })
     : builder.compile()) as unknown as CompiledAgent;
+  cache.set(key, compiled);
+  return compiled;
+}
+
+/**
+ * Compiles a pinned subflow version as a nested graph. Subflows run inside the caller's node and
+ * share its session thread, so they are compiled without their own checkpointer; LangGraph
+ * interrupts raised inside them still propagate to the parent run.
+ */
+export async function compileSubflowGraph(
+  flowId: string,
+  version: number,
+  graph: FlowGraph,
+): Promise<CompiledAgent> {
+  const key = `subflow:${flowId}@${version}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  const builder = buildGraph(graph);
+  const compiled = builder.compile() as unknown as CompiledAgent;
   cache.set(key, compiled);
   return compiled;
 }

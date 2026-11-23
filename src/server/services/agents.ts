@@ -3,12 +3,22 @@ import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { FlowCreateInput, FlowUpdateInput } from "@/lib/agent-schemas";
 import { type FlowGraph, type FlowNode, flowGraphSchema, starterGraph } from "@/lib/agents/graph";
 import {
+  calledSubflowIds,
+  checkSubflowReferences,
+  type PublishedFlowResolver,
+  type SubflowProblem,
+  subflowOutputLabels,
+  subflowParams,
+} from "@/lib/agents/subflows";
+import {
   DEFAULT_FLOW_SETTINGS,
   type FlowDetail,
   type FlowSettings,
   type FlowSummary,
   type FlowVersionDetail,
   type FlowVersionSummary,
+  type SubflowOption,
+  type SubflowUsageEntry,
 } from "@/lib/agents/types";
 import { type ValidationProblem, validateGraph } from "@/lib/agents/validate";
 import { decryptSecret, encryptSecret, maskSecret } from "@/server/crypto/secrets";
@@ -128,16 +138,18 @@ export async function listFlows(): Promise<FlowSummary[]> {
 
 export async function getFlow(id: string): Promise<FlowDetail> {
   const row = await findRow(id);
-  const [latest] = await getDb()
-    .select({ version: flowVersions.version })
+  const versions = await getDb()
+    .select({ version: flowVersions.version, pinnedSubflows: flowVersions.pinnedSubflows })
     .from(flowVersions)
     .where(eq(flowVersions.flowId, id))
-    .orderBy(desc(flowVersions.version))
-    .limit(1);
+    .orderBy(desc(flowVersions.version));
+  const latest = versions[0];
+  const published = versions.find((entry) => entry.version === row.publishedVersion);
   return {
     ...toSummary(row),
     draft: await getFlowDraft(id),
     version_count: latest?.version ?? 0,
+    pinned_subflows: published?.pinnedSubflows ?? {},
   };
 }
 
@@ -155,7 +167,7 @@ export async function createFlow(input: FlowCreateInput): Promise<FlowDetail> {
         description: input.description,
         enabled: input.enabled,
         settings: normalizeSettings(input.settings),
-        draft: starterGraph(),
+        draft: starterGraph(input.kind),
       });
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -247,9 +259,89 @@ export async function duplicateFlow(id: string): Promise<FlowDetail> {
   return getFlow(newId);
 }
 
+async function publishedFlowResolver(): Promise<PublishedFlowResolver> {
+  const rows = await getDb()
+    .select({
+      flowId: flows.id,
+      name: flows.name,
+      kind: flows.kind,
+      version: flowVersions.version,
+      graph: flowVersions.graph,
+    })
+    .from(flows)
+    .innerJoin(
+      flowVersions,
+      and(eq(flowVersions.flowId, flows.id), eq(flowVersions.version, flows.publishedVersion)),
+    )
+    .where(isNotNull(flows.publishedVersion));
+  const map = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) map.set(row.flowId, row);
+  return (flowId) => map.get(flowId);
+}
+
+/** Every published caller of `flowId`, with the version it pins (latest published caller only). */
+export async function listSubflowUsage(flowId: string): Promise<SubflowUsageEntry[]> {
+  const rows = await getDb()
+    .select({
+      flowId: flows.id,
+      name: flows.name,
+      kind: flows.kind,
+      version: flowVersions.version,
+      graph: flowVersions.graph,
+      pinnedSubflows: flowVersions.pinnedSubflows,
+      publishedAt: flowVersions.publishedAt,
+    })
+    .from(flows)
+    .innerJoin(
+      flowVersions,
+      and(eq(flowVersions.flowId, flows.id), eq(flowVersions.version, flows.publishedVersion)),
+    )
+    .where(and(isNotNull(flows.publishedVersion), eq(flows.enabled, true)));
+  const usage: SubflowUsageEntry[] = [];
+  for (const row of rows) {
+    if (row.flowId === flowId) continue;
+    if (!calledSubflowIds(row.graph).includes(flowId)) continue;
+    usage.push({
+      flow_id: row.flowId,
+      name: row.name,
+      kind: row.kind,
+      version: row.version,
+      pinned_version: row.pinnedSubflows?.[flowId] ?? null,
+      published_at: row.publishedAt.toISOString(),
+    });
+  }
+  return usage.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function deleteFlow(id: string): Promise<void> {
   await findRow(id);
+  const usage = await listSubflowUsage(id);
+  if (usage.length > 0) {
+    throw new ServiceError(
+      409,
+      "flow_in_use",
+      "This subflow is still called by published flows",
+      usage,
+    );
+  }
   await getDb().delete(flows).where(eq(flows.id, id));
+}
+
+/** Resolves the pins a publish would capture: each called subflow's current published version. */
+export async function computePinnedSubflows(graph: FlowGraph): Promise<Record<string, number>> {
+  const ids = calledSubflowIds(graph);
+  if (ids.length === 0) return {};
+  const rows = await getDb()
+    .select({ id: flows.id, publishedVersion: flows.publishedVersion, kind: flows.kind })
+    .from(flows);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const pins: Record<string, number> = {};
+  for (const id of ids) {
+    const target = byId.get(id);
+    if (!target || target.publishedVersion === null) continue;
+    pins[id] = target.publishedVersion;
+  }
+  return pins;
 }
 
 /** Replaces the webhook header secrets referenced by the graph (values present on the node). */
@@ -336,10 +428,10 @@ export interface PublishResult {
   note: string;
 }
 
-/** Validates the draft and stores the next immutable version. */
+/** Validates the draft and stores the next immutable version (with subflow pins). */
 export async function publishFlow(id: string, note: string): Promise<PublishResult> {
   const row = await findRow(id);
-  const validation = validateGraph(row.draft);
+  const validation = await validateFlowPublish(id, row.kind, row.draft);
   if (!validation.valid) {
     throw new ServiceError(
       400,
@@ -348,6 +440,7 @@ export async function publishFlow(id: string, note: string): Promise<PublishResu
       validation.problems,
     );
   }
+  const pinnedSubflows = await computePinnedSubflows(row.draft);
   const version = (row.publishedVersion ?? 0) + 1;
   const publishedAt = new Date();
   await getDb().transaction(async (tx) => {
@@ -355,6 +448,7 @@ export async function publishFlow(id: string, note: string): Promise<PublishResu
       flowId: id,
       version,
       graph: row.draft,
+      pinnedSubflows,
       note,
       publishedAt,
     });
@@ -366,12 +460,38 @@ export async function publishFlow(id: string, note: string): Promise<PublishResu
   return { version, published_at: publishedAt.toISOString(), note };
 }
 
+function toValidationProblem(problem: SubflowProblem): ValidationProblem {
+  return {
+    nodeId: problem.nodeId,
+    nodeTitle: problem.nodeTitle,
+    message: problem.message,
+  };
+}
+
+/** Pure structural validation plus the cross-flow subflow checks (published targets, cycles). */
+async function validateFlowPublish(
+  id: string,
+  kind: FlowDetail["kind"],
+  graph: FlowGraph,
+): Promise<{ valid: boolean; problems: ValidationProblem[] }> {
+  const structural = validateGraph(graph, { kind });
+  const resolver = await publishedFlowResolver();
+  const referenceProblems = checkSubflowReferences({
+    flowId: id,
+    graph,
+    resolver,
+  }).map(toValidationProblem);
+  const problems = [...structural.problems, ...referenceProblems];
+  return { valid: problems.length === 0, problems };
+}
+
 export async function validateFlowDraft(
   id: string,
   graph?: FlowGraph,
 ): Promise<{ valid: boolean; problems: ValidationProblem[] }> {
-  const draft = graph ?? (await findRow(id)).draft;
-  return validateGraph(draft);
+  const row = await findRow(id);
+  const draft = graph ?? row.draft;
+  return validateFlowPublish(id, row.kind, draft);
 }
 
 function toVersionSummary(row: VersionRow, graph: FlowGraph): FlowVersionSummary {
@@ -400,7 +520,11 @@ export async function getVersion(flowId: string, version: number): Promise<FlowV
     .from(flowVersions)
     .where(and(eq(flowVersions.flowId, flowId), eq(flowVersions.version, version)));
   if (!row) throw new ServiceError(404, "flow_version_not_found", "Version not found");
-  return { ...toVersionSummary(row, row.graph), graph: row.graph };
+  return {
+    ...toVersionSummary(row, row.graph),
+    graph: row.graph,
+    pinned_subflows: row.pinnedSubflows ?? {},
+  };
 }
 
 /** Restores a published version into the draft (publishing it again creates a new version). */
@@ -418,15 +542,26 @@ export interface ResolvedAgent {
   flow: FlowRow;
   version: number;
   graph: FlowGraph;
+  pinnedSubflows: Record<string, number>;
 }
 
-/** An enabled flow with at least one published version; undefined when unknown or not live. */
+/**
+ * An enabled *agent* flow with at least one published version; undefined when unknown, a
+ * subflow, or not live.
+ */
 export async function resolvePublishedAgent(idOrSlug: string): Promise<ResolvedAgent | undefined> {
   const db = getDb();
   const [byId] = await db
     .select()
     .from(flows)
-    .where(and(eq(flows.id, idOrSlug), eq(flows.enabled, true), isNotNull(flows.publishedVersion)));
+    .where(
+      and(
+        eq(flows.id, idOrSlug),
+        eq(flows.kind, "agent"),
+        eq(flows.enabled, true),
+        isNotNull(flows.publishedVersion),
+      ),
+    );
   const row = byId ?? (await findPublishedBySlug(idOrSlug));
   if (!row || row.publishedVersion === null) return undefined;
   const [version] = await db
@@ -434,14 +569,26 @@ export async function resolvePublishedAgent(idOrSlug: string): Promise<ResolvedA
     .from(flowVersions)
     .where(and(eq(flowVersions.flowId, row.id), eq(flowVersions.version, row.publishedVersion)));
   if (!version) return undefined;
-  return { flow: row, version: version.version, graph: version.graph };
+  return {
+    flow: row,
+    version: version.version,
+    graph: version.graph,
+    pinnedSubflows: version.pinnedSubflows ?? {},
+  };
 }
 
 async function findPublishedBySlug(slug: string): Promise<FlowRow | undefined> {
   const [row] = await getDb()
     .select()
     .from(flows)
-    .where(and(eq(flows.slug, slug), eq(flows.enabled, true), isNotNull(flows.publishedVersion)));
+    .where(
+      and(
+        eq(flows.slug, slug),
+        eq(flows.kind, "agent"),
+        eq(flows.enabled, true),
+        isNotNull(flows.publishedVersion),
+      ),
+    );
   return row;
 }
 
@@ -457,8 +604,62 @@ export async function listPublishedAgents(): Promise<
       createdAt: flows.createdAt,
     })
     .from(flows)
-    .where(and(eq(flows.enabled, true), isNotNull(flows.publishedVersion)))
+    .where(and(eq(flows.kind, "agent"), eq(flows.enabled, true), isNotNull(flows.publishedVersion)))
     .orderBy(asc(flows.name));
+}
+
+/** Published subflows offered to the Call Subflow picker, with their current contract. */
+export async function listPublishedSubflows(): Promise<SubflowOption[]> {
+  const rows = await getDb()
+    .select({
+      id: flows.id,
+      name: flows.name,
+      version: flowVersions.version,
+      graph: flowVersions.graph,
+    })
+    .from(flows)
+    .innerJoin(
+      flowVersions,
+      and(eq(flowVersions.flowId, flows.id), eq(flowVersions.version, flows.publishedVersion)),
+    )
+    .where(
+      and(eq(flows.kind, "subflow"), eq(flows.enabled, true), isNotNull(flows.publishedVersion)),
+    )
+    .orderBy(asc(flows.name));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    version: row.version,
+    params: subflowParams(row.graph),
+    outputs: subflowOutputLabels(row.graph),
+  }));
+}
+
+/** A published subflow version with its own pins, resolved for a Call Subflow at runtime. */
+export interface ResolvedSubflow {
+  flowId: string;
+  version: number;
+  graph: FlowGraph;
+  pinnedSubflows: Record<string, number>;
+}
+
+export async function loadSubflowVersion(
+  flowId: string,
+  version: number,
+): Promise<ResolvedSubflow | undefined> {
+  const [row] = await getDb().select({ kind: flows.kind }).from(flows).where(eq(flows.id, flowId));
+  if (row?.kind !== "subflow") return undefined;
+  const [published] = await getDb()
+    .select()
+    .from(flowVersions)
+    .where(and(eq(flowVersions.flowId, flowId), eq(flowVersions.version, version)));
+  if (!published) return undefined;
+  return {
+    flowId,
+    version: published.version,
+    graph: published.graph,
+    pinnedSubflows: published.pinnedSubflows ?? {},
+  };
 }
 
 /** Decrypted webhook header values for one node (runtime only; never returned by the admin API). */

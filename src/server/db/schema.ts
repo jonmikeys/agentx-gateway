@@ -417,6 +417,11 @@ export const flowVersions = pgTable(
       .references(() => flows.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     graph: jsonb("graph").$type<FlowGraph>().notNull(),
+    /**
+     * Call Subflow pins: subflow id -> published version captured when this version was published
+     * (spec §13). The parent always runs these versions, so republishing a subflow is opt-in.
+     */
+    pinnedSubflows: jsonb("pinned_subflows").$type<Record<string, number>>().notNull().default({}),
     note: text("note").notNull().default(""),
     publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
   },
