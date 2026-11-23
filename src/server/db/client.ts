@@ -32,10 +32,21 @@ export function getDb(): Database {
   return getConnection().db;
 }
 
-/** Runs `select 1`; resolves true when the database answers. */
-export async function pingDatabase(): Promise<boolean> {
+/** Deadline for the `/health` database probe. */
+export const DEFAULT_PING_TIMEOUT_MS = 5_000;
+
+/** Runs `select 1` with a bounded deadline; resolves true when the database answers in time. */
+export async function pingDatabase(timeoutMs: number = DEFAULT_PING_TIMEOUT_MS): Promise<boolean> {
+  return pingConnection(getConnection().sql, timeoutMs);
+}
+
+/** Sends the probe with an abort signal so a stalled connection cannot hang `/health`. */
+export async function pingConnection(
+  sql: postgres.Sql,
+  timeoutMs: number = DEFAULT_PING_TIMEOUT_MS,
+): Promise<boolean> {
   try {
-    await getConnection().sql`select 1`;
+    await sql`select 1`.signal(AbortSignal.timeout(timeoutMs));
     return true;
   } catch {
     return false;
