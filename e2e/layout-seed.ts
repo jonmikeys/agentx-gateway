@@ -41,6 +41,8 @@ export const CHAT_ROUTE = "layout-qa-failover";
 export const AGENT_FLOW_NAME =
   "Layout QA agent with an extremely long display name that keeps going and going 123";
 export const AGENT_FLOW_ENV = "LAYOUT_QA_FLOW_ID";
+export const CLIENT_FLOW_NAME = "Layout QA client tools agent with a long display name 456";
+export const CLIENT_FLOW_ENV = "LAYOUT_QA_CLIENT_FLOW_ID";
 export const SESSION_IDS_ENV = "LAYOUT_QA_SESSION_IDS";
 
 async function seedMediaAndCameras(admin: APIRequestContext) {
@@ -145,6 +147,7 @@ export interface SessionIds {
 }
 let mediaServer: MockMediaServer;
 let agentFlowId = "";
+let clientFlowId = "";
 let mjpeg: MockMjpeg;
 let mcp: MockMcp;
 const sessionIds: SessionIds = { chat: "", reasoning: "", tools: "", ended: "", responses: "" };
@@ -281,6 +284,70 @@ async function seedAgent(admin: APIRequestContext) {
     expect(published.status()).toBe(201);
   }
   agentFlowId = flow.id;
+}
+
+/** Seeds a second chatflow containing a Client Action so the editor pickers can be exercised. */
+async function seedClientFlow(admin: APIRequestContext) {
+  const flows = ((await (await admin.get("/api/admin/flows")).json()).data ?? []) as {
+    id: string;
+    slug: string;
+  }[];
+  let flow = flows.find((entry) => entry.slug === "layout-qa-client-tools");
+  if (!flow) {
+    const response = await admin.post("/api/admin/flows", {
+      data: {
+        name: CLIENT_FLOW_NAME,
+        slug: "layout-qa-client-tools",
+        description: `Layout QA ${"client tools ".repeat(10)}`,
+        enabled: true,
+      },
+    });
+    expect(response.status()).toBe(201);
+    flow = (await response.json()) as { id: string; slug: string };
+  }
+  const start = {
+    id: "start_client_layout",
+    type: "start",
+    position: { x: 0, y: 0 },
+    data: { title: "Start of the client tools flow" },
+  };
+  const action = {
+    id: "client_action_layout",
+    type: "client_action",
+    position: { x: 280, y: 0 },
+    data: {
+      title: "Show an image on the layout QA screen with a long title",
+      toolName: "show_image",
+      argsTemplate: '{\n  "media_id": ""\n}',
+      outputVariable: "client_result",
+    },
+  };
+  const reply = {
+    id: "reply_client_layout",
+    type: "reply",
+    position: { x: 560, y: 0 },
+    data: {
+      title: "Reply after the client action",
+      template: "Client said {{vars.client_result}}",
+    },
+  };
+  const end = {
+    id: "end_client_layout",
+    type: "end",
+    position: { x: 840, y: 0 },
+    data: { title: "End" },
+  };
+  const graph = {
+    nodes: [start, action, reply, end],
+    edges: [
+      { id: "e_start_action", source: start.id, target: action.id, sourceHandle: "out" },
+      { id: "e_action_reply", source: action.id, target: reply.id, sourceHandle: "out" },
+      { id: "e_reply_end", source: reply.id, target: end.id, sourceHandle: "out" },
+    ],
+  };
+  const drafted = await admin.put(`/api/admin/flows/${flow.id}/draft`, { data: { graph } });
+  expect(drafted.status()).toBe(200);
+  clientFlowId = flow.id;
 }
 
 async function seed(admin: APIRequestContext, upstream: MockUpstream) {
@@ -508,6 +575,7 @@ export default async function globalSetup() {
   try {
     await seed(admin, upstream);
     await seedAgent(admin);
+    await seedClientFlow(admin);
     await seedMcp(admin);
     await seedMediaAndCameras(admin);
     await seedSessions(admin, baseURL);
@@ -516,6 +584,7 @@ export default async function globalSetup() {
   }
   process.env[SESSION_IDS_ENV] = JSON.stringify(sessionIds);
   process.env[AGENT_FLOW_ENV] = agentFlowId;
+  process.env[CLIENT_FLOW_ENV] = clientFlowId;
   return async () => {
     await upstream.close();
     await mediaServer.close();

@@ -31,6 +31,7 @@ const runId = Date.now().toString(36);
 
 const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
 const agentFlowId = process.env.LAYOUT_QA_FLOW_ID ?? "";
+const clientFlowId = process.env.LAYOUT_QA_CLIENT_FLOW_ID ?? "";
 
 // Reduced motion: dialogs fade in, and axe would sample half-transparent text mid-animation.
 test.use({ httpCredentials: { username, password }, reducedMotion: "reduce" });
@@ -485,6 +486,8 @@ for (const viewport of viewports) {
       const settings = page.getByRole("button", { name: "Settings", exact: true });
       await settings.click();
       await expect(page.getByLabel("Name")).toBeVisible();
+      await expect(page.getByLabel("Allowed media tags")).toBeVisible();
+      await expect(page.getByText("Allowed cameras", { exact: true })).toBeVisible();
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
       await settings.click();
@@ -496,6 +499,28 @@ for (const viewport of viewports) {
       await expectNoHorizontalScroll(page);
       await expectNamedControls(page);
       await page.getByRole("button", { name: "Close test drawer" }).click();
+    });
+
+    test("chatflow editor: Client Action media picker fits the properties panel", async ({
+      page,
+    }) => {
+      await openPage(page, `/chatflows/${clientFlowId}`);
+      await page.locator('[data-node-type="client_action"]').click({ position: { x: 12, y: 12 } });
+      if (viewport.name === "mobile") {
+        await page.getByRole("button", { name: "Properties" }).click();
+      }
+      const media = page.getByLabel("Media item");
+      const mediaPicker = viewport.name === "mobile" ? media.last() : media.first();
+      await expect(mediaPicker).toBeVisible();
+      await mediaPicker.click();
+      await page.getByRole("option").first().click();
+      const args = page.getByLabel("Arguments (JSON, templates allowed)");
+      const argsEditor = viewport.name === "mobile" ? args.last() : args.first();
+      await expect(argsEditor).toHaveValue(/media_id/);
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+      await expectNoSeriousAxeViolations(page);
+      if (viewport.name === "mobile") await page.keyboard.press("Escape");
     });
 
     for (const theme of themes) {

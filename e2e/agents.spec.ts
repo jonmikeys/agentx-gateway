@@ -57,3 +57,27 @@ test("build, publish and test a chatflow", async ({ page }) => {
   await page.getByRole("button", { name: "Highlight Reply step" }).click();
   await expect(page.locator('[data-node-type="reply"]')).toHaveClass(/ring-2/);
 });
+
+test("add a Client Action node and pick media for it", async ({ page }) => {
+  await page.goto("/chatflows");
+  await page.getByRole("button", { name: "New chatflow" }).first().click();
+  await page.getByRole("textbox", { name: "Name" }).fill(`E2E client action ${runId}`);
+  await page.getByRole("button", { name: "Create chatflow" }).click();
+  await expect(
+    page.getByRole("heading", { name: `E2E client action ${runId}`, level: 1 }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Add Client Action node" }).click();
+  const card = page.locator('[data-node-type="client_action"]');
+  await expect(card).toBeVisible();
+  await card.click({ position: { x: 12, y: 12 } });
+
+  await expect(page.getByLabel("Client tool")).toBeVisible();
+  const media = page.getByLabel("Media item");
+  await expect(media).toBeVisible();
+  await media.click();
+  await page.getByRole("option").first().click();
+  await expect(page.getByLabel("Arguments (JSON, templates allowed)")).toHaveValue(
+    /"media_id": "med_[a-f0-9]{12}"/,
+  );
+});

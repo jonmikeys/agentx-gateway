@@ -30,8 +30,8 @@ Client (Unity)                      Gateway                                    M
   run bookkeeping (`cursor`, `trace`, streamed `text`, usage).
 - The checkpointer (`@langchain/langgraph-checkpoint-postgres`) stores each run under
   `thread_id = session id`. Session memory is also stored in `session_memory`, so it survives a
-  process restart and is visible in the transcript viewer. Paused client-tool runs (G7b) will
-  resume from the same thread.
+  process restart and is visible in the transcript viewer. Paused client-tool runs resume from the
+  same thread when the client sends the tool results.
 - **Variables** (`vars`) are per-turn and start empty. **Memory** is per session and persists
   across turns. Templates can read both.
 - Session rules are unchanged: no `X-Session-Id` starts a session; a request with a different
@@ -43,19 +43,20 @@ Client (Unity)                      Gateway                                    M
 ## Nodes
 
 Every node has a **title** and an optional **comment** (the comment travels with the graph; the
-icon/popover UI is G7b). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`) also have an
-`error` output handle. Connect `error` to a recovery path; if it is left unconnected a failure
-ends the run as failed.
+icon/popover UI is G7b). Fallible nodes (`LLM`, `Router`, `Webhook`, `MCP Tool`, `Client Action`)
+also have an `error` output handle. Connect `error` to a recovery path; if it is left unconnected a
+failure ends the run as failed.
 
 | Node | What it does |
 |---|---|
 | Start | Entry point. Exposes the latest user message, history, session id and request info to templates. Exactly one per agent. |
-| LLM | Calls a model route (or `inherit`) with a system prompt template and a history choice (full / last N / none). Optionally offers allowed MCP tools and loops (max four rounds). Stores the answer in a variable; streams when it is terminal. |
+| LLM | Calls a model route (or `inherit`) with a system prompt template and a history choice (full / last N / none). Optionally offers allowed MCP tools and the client's Unity tools, looping (max four rounds) and pausing for client tool calls. Stores the answer in a variable; streams when it is terminal. |
 | Router | Branches on rules (`equals`, `contains`, `regex` on a template) or on an intent label picked by an LLM. One output handle per rule/label plus `default` and `error`. |
 | Set Variable | Assigns variables from templates. |
 | Webhook | Calls an HTTP endpoint with templated URL/body and encrypted headers, a timeout (default 10 s), 0–3 retries, a response size cap and JSON-path mappings into variables. |
 | Memory | `get`, `set`, `append` or `delete` a session memory key. |
 | MCP Tool | Calls one allowed tool on a registered MCP server with fixed or templated arguments. |
+| Client Action | Emits one fixed Unity tool call (media, camera, animation or a free-form name with a JSON args template) and pauses for the result. A result with `ok: false` takes the optional `error` handle. |
 | Reply | Streams templated text mid-flow. Several Replies stream in order. |
 | End | Ends the turn. |
 
@@ -146,6 +147,73 @@ and prototypes are unreachable, and there is no way to run code. The editor sugg
 - `vars.<name>` — variables set by Set Variable, Memory, Webhook, MCP Tool or LLM nodes
 - `memory.<key>` — session memory at the start of the run
 - `nodes.<node id>.output` — the output of a node that already ran this turn
+
+## Unity (client) tools
+
+Unity sends its own function tools with each request (`tools` in Chat Completions, function tools
+in the Responses `input`). An LLM node chooses what to offer: **none**, **every** tool from the
+request, or a **subset by name** (Agent editor → the node's inspector). When the model calls one
+of them the gateway does not execute it: the run **pauses** and the client receives the call in
+the normal OpenAI shape — `tool_calls` with `finish_reason: "tool_calls"` for chat, a
+`function_call` output item for Responses (streamed or not). The next request in the same session
+that carries the results (`role: "tool"` messages, or `function_call_output` items) **resumes**
+the checkpointed run and continues from the paused node.
+
+- A pause uses a LangGraph `interrupt()`, so the graph state (messages, variables, memory,
+  position) is checkpointed under `thread_id = session id`.
+- **Mixed MCP and client calls** in one model reply: the gateway executes the MCP calls server-side
+  (as the plain-chat loop does), returns only the client calls, and injects the MCP results when
+  the run resumes.
+- A request that starts a new user message while the run is paused **abandons** the paused run and
+  starts a fresh one. Paused checkpoints are cleared when the session is purged.
+- LLM nodes that offer client tools do not stream their own text; the final text arrives with the
+  resumed turn. Pre-tool chatter stays out of the reply.
+- The per-agent restrictions below narrow the `media_id` / `camera_id` enums before the tools are
+  offered.
+
+```mermaid
+sequenceDiagram
+    participant C as Unity client
+    participant G as Gateway
+    participant L as LangGraph
+    participant U as Provider
+    C->>G: POST /v1/chat/completions { agent_id, tools, messages }
+    G->>L: invoke(thread_id = session id)
+    L->>U: chat (MCP + client tools offered)
+    U-->>L: tool_calls: show_image { media_id }
+    L-->>G: interrupt (checkpointed)
+    G-->>C: tool_calls response (finish_reason: tool_calls)
+    Note over C,G: The run is paused; it is not resumed automatically.
+    C->>G: POST /v1/chat/completions { messages + role: tool, tools }
+    G->>L: Command({ resume: tool results })
+    L->>U: chat with the tool result
+    U-->>L: final answer
+    L-->>G: run completes
+    G-->>C: streamed answer + X-Session-Id
+```
+
+### Client Action
+
+The **Client Action** node sends one tool call without a model. Pick a fixed tool — `show_image`
+or `show_video` (`media_id`), `show_camera` (`camera_id`), `play_animation` (`animation_id`) — or
+enter a free-form tool name. The arguments are a JSON object template, so
+`{"media_id":"{{vars.media}}"}` works. The node pauses exactly like an LLM client-tool call and
+stores the parsed result in its **output variable** (`client_result` by default). A result with
+`ok: false` follows the `error` handle; everything else follows `out`.
+
+### Restrictions
+
+The Agent **Settings** tab holds `allowed_media_tags` and `allowed_cameras` (stored in
+`flows.settings`). They are a filter, not a hard allowlist for every request:
+
+- The enums of forwarded `show_image` / `show_video` / `show_camera` tools are narrowed to the
+  media items carrying an allowed tag and to the allowed camera ids.
+- The Client Action media and camera pickers only list the allowed items.
+- Publishing rejects a Client Action whose literal `media_id` / `camera_id` is outside the allowed
+  sets.
+
+An empty list means "no restriction". These are per agent, so an agent can be limited to a subset
+of the media library and cameras.
 
 ## Publishing and versions
 
