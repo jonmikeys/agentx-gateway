@@ -42,13 +42,18 @@ export function adminHeaders(): Record<string, string> {
   return { Authorization: `Basic ${token}`, "Content-Type": "application/json" };
 }
 
-export async function seedProvider(name: string, baseUrl: string, apiKey: string | null = null) {
+export async function seedProvider(
+  name: string,
+  baseUrl: string,
+  apiKey: string | null = null,
+  responsesApi = false,
+) {
   return createProvider({
     name,
     base_url: baseUrl,
     api_key: apiKey,
     enabled: true,
-    capabilities: { streaming: true, tools: true, responses_api: false },
+    capabilities: { streaming: true, tools: true, responses_api: responsesApi },
     extra_headers: null,
   });
 }

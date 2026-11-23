@@ -137,6 +137,8 @@ function toRequestView(
     provider_name: providerName,
     upstream_model: row.upstreamModel,
     stream: row.stream,
+    client_api: row.clientApi,
+    upstream_api: row.upstreamApi,
     status: row.status,
     http_status: row.httpStatus,
     error_code: row.errorCode,

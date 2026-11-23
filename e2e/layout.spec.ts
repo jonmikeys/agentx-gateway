@@ -221,7 +221,7 @@ for (const viewport of viewports) {
       await expectNamedControls(page);
     });
 
-    for (const scenario of ["chat", "reasoning", "tools", "ended"] as const) {
+    for (const scenario of ["chat", "reasoning", "tools", "ended", "responses"] as const) {
       for (const theme of themes) {
         test(`transcript (${scenario}): layout and axe, ${theme} theme`, async ({ page }) => {
           await page.addInitScript((value) => {
@@ -236,6 +236,11 @@ for (const viewport of viewports) {
           await expectNoHorizontalScroll(page);
           await expectNamedControls(page);
           await expectNoSeriousAxeViolations(page);
+          if (scenario === "responses") {
+            const badges = page.getByTestId("api-badge");
+            await expect(badges.first()).toHaveText("responses → chat");
+            await expect(badges.last()).toHaveText("responses → responses");
+          }
           if (scenario === "ended") {
             await expect(page.getByRole("button", { name: "End session" })).toBeDisabled();
             await expect(page.getByTestId("live-indicator")).toHaveCount(0);

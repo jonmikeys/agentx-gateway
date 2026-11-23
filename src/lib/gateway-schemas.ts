@@ -82,6 +82,17 @@ export const chatCompletionRequestSchema = z.looseObject({
   stream: z.boolean().optional(),
 });
 
+/** Minimal Responses validation; every other field passes through (native) or is dropped (translated). */
+export const responsesRequestSchema = z.looseObject({
+  input: z.union(
+    [z.string().min(1), z.array(z.unknown()).min(1)],
+    "input must be a non-empty string or array of items",
+  ),
+  model: z.unknown().optional(),
+  stream: z.boolean().optional(),
+  previous_response_id: z.unknown().optional(),
+});
+
 export const sessionSettingsSchema = z.object({
   idle_timeout_minutes: z.coerce.number().int().min(1).max(10_080),
   retention_days: z.coerce.number().int().min(0).max(3650),

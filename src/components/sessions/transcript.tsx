@@ -178,6 +178,24 @@ function AttemptsPopover({ request }: { request: LinkedRequestView }) {
   );
 }
 
+/** `chat` for plain chat completions; `responses`, `responses -> chat` (translated) or `responses -> responses` (native). */
+function ApiBadge({ request }: { request: LinkedRequestView }) {
+  const upstream = request.upstream_api;
+  const translated = upstream !== null && upstream !== request.client_api;
+  const label =
+    upstream && request.client_api !== "chat"
+      ? `${request.client_api} → ${upstream}`
+      : request.client_api;
+  const explanation = translated
+    ? `The client spoke ${request.client_api}; the gateway translated it to ${upstream} for the provider.`
+    : `The client spoke ${request.client_api} and the provider was called the same way.`;
+  return (
+    <Badge variant="outline" data-testid="api-badge" title={explanation} className="font-mono">
+      {label}
+    </Badge>
+  );
+}
+
 function RequestMetadata({ request }: { request: LinkedRequestView }) {
   return (
     <div
@@ -192,6 +210,7 @@ function RequestMetadata({ request }: { request: LinkedRequestView }) {
         <Clock className="size-3" />
         {formatDuration(request.duration_ms)}
       </span>
+      <ApiBadge request={request} />
       <span>TTFT {formatDuration(request.ttft_ms)}</span>
       {request.usage && <span>{formatCount(request.usage.total_tokens)} tokens</span>}
       {request.attempts.length > 1 && <AttemptsPopover request={request} />}

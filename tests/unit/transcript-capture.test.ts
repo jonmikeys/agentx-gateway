@@ -70,8 +70,13 @@ describe("ResponseCapture", () => {
       }),
     );
     expect(capture.finish().toolCalls).toEqual([
-      { id: "call_a", name: "show_image", args: { media_id: "x" } },
-      { id: "call_b", name: "list_media", args: {} },
+      {
+        id: "call_a",
+        name: "show_image",
+        args: { media_id: "x" },
+        rawArguments: expect.any(String),
+      },
+      { id: "call_b", name: "list_media", args: {}, rawArguments: expect.any(String) },
     ]);
   });
 

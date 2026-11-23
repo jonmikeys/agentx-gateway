@@ -15,7 +15,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -237,7 +244,6 @@ export function ProviderFormDialog({
                   ["enabled", "Enabled"],
                   ["streaming", "Streaming"],
                   ["tools", "Tools"],
-                  ["responses_api", "Responses API"],
                 ] as const
               ).map(([name, label]) => (
                 <Controller
@@ -257,6 +263,29 @@ export function ProviderFormDialog({
                 />
               ))}
             </div>
+            <Controller
+              control={control}
+              name="responses_api"
+              render={({ field }) => (
+                <Field orientation="horizontal">
+                  <Switch
+                    id="provider-responses_api"
+                    aria-describedby="provider-responses_api-help"
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                  <FieldContent>
+                    <FieldLabel htmlFor="provider-responses_api">Responses API</FieldLabel>
+                    <FieldDescription id="provider-responses_api-help">
+                      Turn on when this endpoint implements <code>POST /responses</code> (OpenAI and
+                      compatible servers). <code>/v1/responses</code> requests then go to it
+                      natively, unchanged. Leave off for chat-only servers (DeepSeek, Ollama,
+                      Groq...): the gateway translates to <code>/chat/completions</code> and back.
+                    </FieldDescription>
+                  </FieldContent>
+                </Field>
+              )}
+            />
           </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

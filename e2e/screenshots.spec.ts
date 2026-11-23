@@ -41,7 +41,13 @@ const captured: Captured[] = [];
 let upstream: MockUpstream;
 let admin: APIRequestContext;
 let gateway: APIRequestContext;
-const demo = { reasoningSession: "", toolSession: "", endedSession: "", failoverSession: "" };
+const demo = {
+  reasoningSession: "",
+  toolSession: "",
+  endedSession: "",
+  failoverSession: "",
+  responsesSession: "",
+};
 
 type Message = Record<string, unknown>;
 
@@ -60,17 +66,23 @@ async function seedDemoData(): Promise<string> {
     >[];
   const providerIds: Record<string, string> = {};
   const demoProviders = [
-    { name: "OpenAI", key: "sk-demo-openai-not-a-real-key-a1b2" },
-    { name: "DeepSeek", key: "sk-demo-deepseek-not-a-real-key-c3d4" },
+    { name: "OpenAI", key: "sk-demo-openai-not-a-real-key-a1b2", responsesApi: false },
+    { name: "DeepSeek", key: "sk-demo-deepseek-not-a-real-key-c3d4", responsesApi: false },
+    { name: "Azure Responses", key: "sk-demo-azure-not-a-real-key-e5f6", responsesApi: true },
   ];
-  for (const { name, key } of demoProviders) {
+  for (const { name, key, responsesApi } of demoProviders) {
     const found = (await existing("providers")).find((provider) => provider.name === name);
     if (found) {
       providerIds[name] = found.id;
       continue;
     }
     const response = await admin.post("/api/admin/providers", {
-      data: { name, base_url: upstream.url, api_key: key },
+      data: {
+        name,
+        base_url: upstream.url,
+        api_key: key,
+        capabilities: { streaming: true, tools: true, responses_api: responsesApi },
+      },
     });
     expect(response.status()).toBe(201);
     providerIds[name] = (await response.json()).id;
@@ -99,6 +111,11 @@ async function seedDemoData(): Promise<string> {
       slug: "avatar-tools",
       description: "Model that calls the Unity show_image tool",
       steps: [["OpenAI", "tool-call"]],
+    },
+    {
+      slug: "avatar-responses-native",
+      description: "Responses API forwarded natively to a provider with responses_api",
+      steps: [["Azure Responses", "echo"]],
     },
     {
       slug: "avatar-echo",
@@ -162,6 +179,27 @@ async function converse(model: string, messages: Message[], sessionId?: string) 
   expect(response.status()).toBe(200);
   const body = await response.text();
   return { id: response.headers()["x-session-id"] as string, reply: replyText(body) };
+}
+
+/** Concatenated `response.output_text.delta` text of a Responses SSE body. */
+function responsesReplyText(sse: string): string {
+  let text = "";
+  for (const line of sse.split(/\r?\n/)) {
+    if (!line.startsWith("data: ")) continue;
+    const event = JSON.parse(line.slice(6));
+    if (event.type === "response.output_text.delta") text += event.delta;
+  }
+  return text.trim();
+}
+
+async function converseResponses(model: string, input: Message[], sessionId?: string) {
+  const response = await gateway.post("/v1/responses", {
+    data: { model, stream: true, input, instructions: SYSTEM_PROMPT.content },
+    headers: sessionId ? { "X-Session-Id": sessionId } : {},
+  });
+  expect(response.status()).toBe(200);
+  const body = await response.text();
+  return { id: response.headers()["x-session-id"] as string, reply: responsesReplyText(body) };
 }
 
 /**
@@ -275,6 +313,21 @@ async function seedSessions() {
     ]);
     await waitForRequests(failover.id, 1);
     demo.failoverSession = failover.id;
+
+    // 4b. Responses API client: a translated turn (responses -> chat) with reasoning, then a
+    // native turn (responses -> responses) in the same session.
+    const responsesInput: Message[] = [
+      { role: "user", content: "Hello! Please greet our visitors." },
+    ];
+    const responsesFirst = await converseResponses("avatar-reasoning", [...responsesInput]);
+    await waitForRequests(responsesFirst.id, 1);
+    responsesInput.push(
+      { role: "assistant", content: responsesFirst.reply },
+      { role: "user", content: "Now say it once more, natively." },
+    );
+    await converseResponses("avatar-responses-native", [...responsesInput], responsesFirst.id);
+    await waitForRequests(responsesFirst.id, 2);
+    demo.responsesSession = responsesFirst.id;
 
     // 5. Standalone one-shot helper call (idle-expired and flagged by the sweeper).
     const oneShot = await converse("avatar-echo", [
@@ -442,6 +495,7 @@ for (const theme of themes) {
       await page.getByRole("button", { name: "New provider" }).click();
       await page.getByLabel("Name").fill("Groq");
       await page.getByLabel("Base URL").fill("https://api.groq.com/openai/v1");
+      await page.getByLabel("Responses API").scrollIntoViewIfNeeded();
       await settleDialog(page);
       await save(
         page,
@@ -556,6 +610,22 @@ for (const theme of themes) {
         "Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration",
         false,
         true,
+      );
+    });
+
+    test("state: responses api session", async ({ page }) => {
+      await page.goto(`/sessions/${demo.responsesSession}`);
+      await expect(page.getByText("responses → chat")).toBeVisible();
+      await expect(page.getByText("responses → responses")).toBeVisible();
+      for (const trigger of await page.getByRole("button", { name: /^Thinking/ }).all()) {
+        await trigger.click();
+      }
+      await settle(page);
+      await save(
+        page,
+        "state-session-responses",
+        "Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns",
+        false,
       );
     });
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { sessions, transcriptItems, turns } from "@/server/db/schema";
-import type { RequestOutcome } from "@/server/gateway/chat-proxy";
+import type { RequestOutcome } from "@/server/gateway/llm-proxy";
 import { diffNewItems, hashSystemPrompt } from "@/server/gateway/transcript/diff";
 import { redactText, redactValue } from "@/server/gateway/transcript/redaction";
 import { ServiceError } from "@/server/services/errors";

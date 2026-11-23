@@ -22,6 +22,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-detail-light.png](state-session-detail-light.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (light theme) |
 | ![state-session-detail-full-light.png](state-session-detail-full-light.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (light theme) |
 | ![state-session-tool-card-light.png](state-session-tool-card-light.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (light theme) |
+| ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (light theme) |
 | ![state-session-failover-light.png](state-session-failover-light.png) | Session transcript: the failover popover lists every provider attempt and its outcome (light theme) |
 | ![state-session-ended-light.png](state-session-ended-light.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (light theme) |
 | ![state-sessions-search-light.png](state-sessions-search-light.png) | Sessions: full-text search for "sunset" (light theme) |
@@ -45,6 +46,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-detail-dark.png](state-session-detail-dark.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (dark theme) |
 | ![state-session-detail-full-dark.png](state-session-detail-full-dark.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (dark theme) |
 | ![state-session-tool-card-dark.png](state-session-tool-card-dark.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (dark theme) |
+| ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses → chat) and native (responses → responses) turns (dark theme) |
 | ![state-session-failover-dark.png](state-session-failover-dark.png) | Session transcript: the failover popover lists every provider attempt and its outcome (dark theme) |
 | ![state-session-ended-dark.png](state-session-ended-dark.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (dark theme) |
 | ![state-sessions-search-dark.png](state-sessions-search-dark.png) | Sessions: full-text search for "sunset" (dark theme) |

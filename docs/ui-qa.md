@@ -36,7 +36,7 @@ E2E_ADMIN_USERNAME=<ADMIN_USERNAME> E2E_ADMIN_PASSWORD=<ADMIN_PASSWORD> pnpm tes
 
 `E2E_BASE_URL` (default `http://localhost:3000`) selects another port. `e2e/layout.spec.ts` seeds
 long-named providers, a 10-step route and an emoji-labelled key through the admin API (idempotent,
-reusing rows by name; `e2e/layout-seed.ts` runs once as Playwright global setup, so parallel workers never race, and creates fresh sessions each run through the real gateway: a long failover conversation with nasty text, reasoning, tool-call and ended sessions), then for each page in `src/components/app-shell/nav.ts` at 1440 and 390 px:
+reusing rows by name; `e2e/layout-seed.ts` runs once as Playwright global setup, so parallel workers never race, and creates fresh sessions each run through the real gateway: a long failover conversation with nasty text, reasoning, tool-call and ended sessions, and a Responses API session with one translated `responses → chat` and one native `responses → responses` turn), then for each page in `src/components/app-shell/nav.ts` at 1440 and 390 px:
 
 - no horizontal page scroll (`scrollWidth <= innerWidth`);
 - every button and link has an accessible name;

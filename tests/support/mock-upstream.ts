@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { handleResponses } from "./mock-responses";
 
 /**
  * OpenAI-compatible mock upstream for tests, e2e and manual demos. Behaviour is chosen by the
@@ -15,6 +16,7 @@ import type { AddressInfo } from "node:net";
  *   think-tags       streams the thinking inside <think>...</think> tags split across chunks
  *   tool-call        asks for the client tool `show_image`; after a tool result it answers in text
  *   echo             answers "Echo: <last user message>" (for search and redaction tests)
+ * `POST /responses` (native Responses API, see mock-responses.ts) supports the same switches.
  * Self-contained (no `@/` imports) so Playwright and tsx can run it.
  */
 export interface RecordedRequest {
@@ -30,6 +32,8 @@ export interface MockUpstream {
   requests: RecordedRequest[];
   /** Requests received for `/chat/completions` only. */
   chatRequests: () => RecordedRequest[];
+  /** Requests received for `/responses` only. */
+  responsesRequests: () => RecordedRequest[];
   reset: () => void;
   close: () => Promise<void>;
 }
@@ -160,6 +164,11 @@ export async function startMockUpstream(options: MockUpstreamOptions = {}): Prom
         object: "list",
         data: models.map((id) => ({ id, object: "model", owned_by: "mock" })),
       });
+      return;
+    }
+
+    if (request.method === "POST" && path === "/responses") {
+      await handleResponses(request, response, body, slowMs, sendError);
       return;
     }
 
@@ -298,6 +307,7 @@ export async function startMockUpstream(options: MockUpstreamOptions = {}): Prom
     port,
     requests,
     chatRequests: () => requests.filter((entry) => entry.path === "/chat/completions"),
+    responsesRequests: () => requests.filter((entry) => entry.path === "/responses"),
     reset: () => {
       requests.length = 0;
     },

@@ -83,3 +83,8 @@ export function formatSse(data: string): string {
   const lines = data.split("\n").map((line) => `data: ${line}`);
   return `${lines.join("\n")}\n\n`;
 }
+
+/** Serializes a named SSE event (`event:` line plus one `data:` line per payload line). */
+export function formatSseEvent(event: string, data: string): string {
+  return `event: ${event}\n${formatSse(data)}`;
+}

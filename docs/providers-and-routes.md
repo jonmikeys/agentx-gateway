@@ -32,6 +32,11 @@ The Unity client omits `model` when its model dropdown is set to "default", so t
 must always exist for that case to work. Unknown models return **400, not 404**: on chat routes
 404 is reserved for `session_not_found` (Unity treats any 404 on a session request as expiry).
 
+`POST /v1/responses` follows the same route resolution, failover, error mapping and logging. Each
+step is called natively (`{base_url}/responses`) when its provider has the `responses_api`
+capability, otherwise through `/chat/completions` with translation both ways; see
+[responses-api.md](responses-api.md).
+
 `POST /v1/chat/completions` passes every field it does not understand straight to the upstream
 (`tools`, `tool_choice`, `reasoning_effort`, `thinking`, ...). `model` is replaced by the step's
 upstream model, and the gateway-only field `agent_id` is removed. For streams the gateway adds
@@ -117,7 +122,8 @@ The Providers page shows the state (Healthy, Circuit open, Half-open).
 
 Every client request writes one `llm_requests` row: API key, route slug, the provider and
 upstream model that answered, stream flag, status, HTTP status, error code, start time, duration,
-time to first token, the list of attempts (`provider_id`, `provider_name`, `model`, `outcome`,
+time to first token, the client API and the upstream API (`chat` or `responses`; they differ when a
+Responses request was translated), the list of attempts (`provider_id`, `provider_name`, `model`, `outcome`,
 `http_status`, `error_code`, `latency_ms`) and token usage. **Message content is never stored in this table or
 logged.** Since G3 each row also carries `session_id` and `turn_id`; the transcript text lives in
 `transcript_items` (see [sessions-and-transcripts.md](sessions-and-transcripts.md)).
@@ -147,5 +153,6 @@ curl -N http://localhost:3000/v1/chat/completions \
 ```
 
 The mock selects behaviour by upstream model name: `ok`, `fail-500`, `fail-429`, `fail-401`,
-`fail-404`, `bad-request-400`, `slow`, `midstream-fail`, `empty-stream`. Put a `fail-500` step
+`fail-404`, `bad-request-400`, `slow`, `midstream-fail`, `empty-stream` (plus `reasoning`, `think-tags`,
+`tool-call`, `echo`) for `/chat/completions` and `/responses` alike. Put a `fail-500` step
 before an `ok` step to watch a failover.
