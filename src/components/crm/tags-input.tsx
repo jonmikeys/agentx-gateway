@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { type KeyboardEvent, useId, useState } from "react";
+import { TruncatedText } from "@/components/crm/truncated-text";
 import { Badge } from "@/components/ui/badge";
 import { MAX_TAG_LENGTH, MAX_TAGS, normalizeTags } from "@/lib/media-schemas";
 
@@ -46,9 +47,7 @@ export function TagsInput({
     <div className="flex min-h-8 w-full min-w-0 flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent px-1.5 py-1 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
       {value.map((tag) => (
         <Badge key={tag} variant="secondary" className="max-w-full gap-1 pr-1">
-          <span className="truncate" title={tag}>
-            {tag}
-          </span>
+          <TruncatedText text={tag} className="max-w-full" />
           <button
             type="button"
             className="rounded-full p-0.5 hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"

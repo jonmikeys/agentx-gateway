@@ -89,9 +89,26 @@ async function seedMediaAndCameras(admin: APIRequestContext) {
   await external(mediaNames.external, "/pic.png");
   await external(mediaNames.clip, "/clip.mp4");
 
-  const knownCameras = await names("cameras");
+  const knownCameras = new Map(
+    (
+      ((await (await admin.get("/api/admin/cameras")).json()).data ?? []) as {
+        id: string;
+        name: string;
+      }[]
+    ).map((item) => [item.name, item.id]),
+  );
   const camera = async (data: Record<string, unknown>) => {
-    if (knownCameras.has(data.name as string)) return;
+    const existing = knownCameras.get(data.name as string);
+    if (existing) {
+      // The mock stream gets a new port every run, so point a reused camera at the current one.
+      if (data.url) {
+        const response = await admin.patch(`/api/admin/cameras/${existing}`, {
+          data: { url: data.url },
+        });
+        expect(response.status()).toBe(200);
+      }
+      return;
+    }
     expect((await admin.post("/api/admin/cameras", { data })).status()).toBe(201);
   };
   await camera({
