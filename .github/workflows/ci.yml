@@ -18,6 +18,8 @@ env:
   ADMIN_USERNAME: ci-admin
   ADMIN_PASSWORD: ci-admin-password
   DATABASE_URL: postgres://agentx:agentx@localhost:5432/agentx
+  # The default /data/media is not writable on GitHub runners; keep uploads in the checkout.
+  MEDIA_STORAGE_DIR: ./data/media
 
 jobs:
   check:
