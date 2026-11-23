@@ -28,6 +28,9 @@ describe("cameras API", () => {
   });
 
   afterAll(async () => {
+    // The rotation test re-encrypts credentials with a throwaway key; clear it so the next
+    // file in the shared database never sees rows it cannot decrypt.
+    await resetGatewayState();
     await camera.close();
     await closeDatabase();
   });
