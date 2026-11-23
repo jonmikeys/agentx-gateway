@@ -30,6 +30,9 @@ ENV NODE_ENV=production \
 RUN addgroup -S -g 1001 gateway && adduser -S -u 1001 -G gateway gateway \
     && mkdir -p /data/media && chown -R gateway:gateway /data
 
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 COPY --from=build --chown=gateway:gateway /app/.next/standalone ./
 COPY --from=build --chown=gateway:gateway /app/.next/static ./.next/static
 COPY --from=build --chown=gateway:gateway /app/public ./public
@@ -43,4 +46,5 @@ VOLUME ["/data/media"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { BasicAdminAuth, guardAdminRequest, parseBasicAuthHeader } from "@/server/auth/admin-auth";
+import {
+  BasicAdminAuth,
+  getClientIp,
+  guardAdminRequest,
+  parseBasicAuthHeader,
+} from "@/server/auth/admin-auth";
 import { FailedLoginLimiter } from "@/server/auth/rate-limit";
 
 const credentials = { username: "admin", password: "p@ss:word" };
@@ -43,6 +48,24 @@ describe("BasicAdminAuth", () => {
     expect(auth.authenticate(requestWith(basic("root", "p@ss:word")))).toEqual({ ok: false });
     expect(auth.authenticate(requestWith(basic("admin", "nope")))).toEqual({ ok: false });
     expect(auth.authenticate(requestWith())).toEqual({ ok: false });
+  });
+});
+
+describe("getClientIp", () => {
+  it("uses the rightmost forwarded address, which the nearest proxy appended", () => {
+    const request = new Request("http://localhost/api/admin/me", {
+      headers: { "x-forwarded-for": "10.0.0.1, 203.0.113.5" },
+    });
+    expect(getClientIp(request)).toBe("203.0.113.5");
+  });
+
+  it("falls back to x-real-ip and then a constant", () => {
+    expect(
+      getClientIp(
+        new Request("http://localhost/api/admin/me", { headers: { "x-real-ip": "203.0.113.7" } }),
+      ),
+    ).toBe("203.0.113.7");
+    expect(getClientIp(new Request("http://localhost/api/admin/me"))).toBe("unknown");
   });
 });
 
@@ -95,5 +118,51 @@ describe("guardAdminRequest", () => {
     now += 5 * 60_000 + 1;
     limiter.recordFailure("1.1.1.1");
     expect(limiter.blockedForSeconds("1.1.1.1")).toBe(0);
+  });
+
+  it("does not let a client pick its own bucket by varying a forwarded prefix", async () => {
+    const limiter = new FailedLoginLimiter();
+    const auth = new BasicAdminAuth(credentials);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const request = new Request("http://localhost/api/admin/me", {
+        headers: {
+          authorization: basic("admin", "wrong"),
+          "x-forwarded-for": `10.0.0.${attempt}, 203.0.113.5`,
+        },
+      });
+      expect(statusOf(await guardAdminRequest(request, auth, limiter))).toBe(401);
+    }
+    const blocked = await guardAdminRequest(
+      requestWith(basic("admin", "p@ss:word"), "203.0.113.5"),
+      auth,
+      limiter,
+    );
+    expect(statusOf(blocked)).toBe(429);
+  });
+
+  it("prunes expired blocks and stale histories while keeping active blocks", () => {
+    let now = 0;
+    const limiter = new FailedLoginLimiter({
+      maxFailures: 2,
+      blockMs: 10_000,
+      windowMs: 1_000,
+      now: () => now,
+    });
+    limiter.recordFailure("198.51.100.1");
+    limiter.recordFailure("198.51.100.1");
+    expect(limiter.blockedForSeconds("198.51.100.1")).toBe(10);
+
+    // Fill the limiter so recordFailure runs the global cleanup pass.
+    for (let i = 0; i < 1000; i += 1) limiter.recordFailure(`10.${i >> 8}.${i & 255}.1`);
+
+    now = 2_000;
+    limiter.prune();
+    expect(limiter.blockedForSeconds("198.51.100.1")).toBe(8);
+    expect(limiter.trackedIps).toBe(1);
+
+    now = 12_000;
+    limiter.prune();
+    expect(limiter.blockedForSeconds("198.51.100.1")).toBe(0);
+    expect(limiter.trackedIps).toBe(0);
   });
 });

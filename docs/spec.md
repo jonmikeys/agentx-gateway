@@ -33,7 +33,7 @@ provider mode. The gateway:
 
 | Concern | Choice |
 |---|---|
-| Runtime | Node 22+ LTS, TypeScript strict, pnpm |
+| Runtime | Node 22.9+ LTS, TypeScript strict, pnpm |
 | Web | Next.js (App Router) for the admin CRM; **Hono** mounted at `app/v1/[[...path]]/route.ts` (and `/agents`, `/health`) via `hono/vercel` `handle()` with `runtime = 'nodejs'` |
 | DB | Postgres + Drizzle ORM + drizzle-kit migrations |
 | Agents | LangGraph.js (`@langchain/langgraph`), Postgres checkpointer (`@langchain/langgraph-checkpoint-postgres`) |
@@ -72,6 +72,7 @@ unknown, Vite/UnoCSS). No code is copied from it.
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string |
 | `GATEWAY_ENCRYPTION_KEY` | yes | base64 32-byte master key for secrets |
+| `NEW_GATEWAY_ENCRYPTION_KEY` | no | replacement key, read only by `pnpm secrets:rotate` |
 | `ADMIN_USERNAME` | yes | Basic auth user for the CRM |
 | `ADMIN_PASSWORD` | yes | Basic auth password for the CRM |
 | `PUBLIC_BASE_URL` | no | External URL (used for media content URLs and docs) |
