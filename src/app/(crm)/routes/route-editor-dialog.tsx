@@ -20,7 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowDown, ArrowUp, GripVertical, ListRestart, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -123,7 +123,7 @@ function SortableStep({
         </button>
         <span className="text-xs font-medium text-muted-foreground">{index + 1}</span>
       </div>
-      <div className="grid flex-1 gap-3 sm:grid-cols-[1fr_1fr_6rem]">
+      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem]">
         <Field data-invalid={!!stepErrors?.provider_id}>
           <FieldLabel>Provider</FieldLabel>
           <Controller
@@ -227,6 +227,7 @@ export function RouteEditorDialog({
 }) {
   const router = useRouter();
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
+  const requestedProviders = useRef(new Set<string>());
   const {
     register,
     control,
@@ -243,6 +244,21 @@ export function RouteEditorDialog({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  const loadModels = useCallback(async (providerId: string) => {
+    if (!providerId || requestedProviders.current.has(providerId)) return;
+    requestedProviders.current.add(providerId);
+    try {
+      const result = await adminFetch<ProviderTestResult>(`providers/${providerId}/test`, {
+        method: "POST",
+      });
+      if (result.ok)
+        setModelsByProvider((current) => ({ ...current, [providerId]: result.models }));
+    } catch {
+      // Suggestions are optional; the field accepts any model name.
+      requestedProviders.current.delete(providerId);
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -261,20 +277,7 @@ export function RouteEditorDialog({
         : { slug: "", description: "", enabled: true, steps: [newStep()] },
     );
     for (const step of route?.steps ?? []) void loadModels(step.provider_id);
-  }, [open, route, reset]);
-
-  async function loadModels(providerId: string) {
-    if (!providerId || modelsByProvider[providerId]) return;
-    try {
-      const result = await adminFetch<ProviderTestResult>(`providers/${providerId}/test`, {
-        method: "POST",
-      });
-      if (result.ok)
-        setModelsByProvider((current) => ({ ...current, [providerId]: result.models }));
-    } catch {
-      // Suggestions are optional; the field accepts any model name.
-    }
-  }
+  }, [open, route, reset, loadModels]);
 
   function onDragEnd(event: DragEndEvent) {
     const { active, over } = event;

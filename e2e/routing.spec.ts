@@ -63,7 +63,7 @@ test("create a provider, test it, create a route and an API key, then call the g
   await page.getByRole("button", { name: "New API key" }).click();
   await page.getByLabel("Label").fill(keyLabel);
   await page.getByRole("button", { name: "Create key" }).click();
-  const keyText = await page.getByTestId("created-api-key").innerText();
+  const keyText = (await page.getByTestId("created-api-key").textContent()) ?? "";
   expect(keyText).toMatch(/^agx_[0-9A-Za-z]{32}$/);
   await expect(page.getByText("won't be shown again")).toBeVisible();
   await page.getByRole("button", { name: "I have saved the key" }).click();
