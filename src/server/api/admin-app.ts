@@ -1,8 +1,11 @@
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { createApiKeysApp } from "@/server/api/admin/api-keys";
+import { createDashboardApp } from "@/server/api/admin/dashboard";
 import { createProvidersApp } from "@/server/api/admin/providers";
 import { createRoutesApp } from "@/server/api/admin/routes";
+import { createSessionsApp } from "@/server/api/admin/sessions";
+import { createSettingsApp } from "@/server/api/admin/settings";
 import { guardAdminRequest } from "@/server/auth/admin-auth";
 
 type AdminEnv = { Variables: { adminUsername: string } };
@@ -25,6 +28,9 @@ export function createAdminApp(): Hono<AdminEnv> {
   admin.route("/api/admin/providers", createProvidersApp());
   admin.route("/api/admin/routes", createRoutesApp());
   admin.route("/api/admin/api-keys", createApiKeysApp());
+  admin.route("/api/admin/sessions", createSessionsApp());
+  admin.route("/api/admin/settings", createSettingsApp());
+  admin.route("/api/admin/dashboard", createDashboardApp());
 
   admin.notFound((c) =>
     c.json({ error: { code: "not_found", message: "Unknown admin route" } }, 404),

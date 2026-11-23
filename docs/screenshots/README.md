@@ -19,6 +19,14 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-test-result-light.png](state-provider-test-result-light.png) | Providers: test connection result with latency and model count (light theme) |
 | ![state-route-editor-light.png](state-route-editor-light.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (light theme) |
 | ![state-api-key-created-light.png](state-api-key-created-light.png) | API Keys: the full key is shown exactly once, with a copy button (light theme) |
+| ![state-session-detail-light.png](state-session-detail-light.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (light theme) |
+| ![state-session-detail-full-light.png](state-session-detail-full-light.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (light theme) |
+| ![state-session-tool-card-light.png](state-session-tool-card-light.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (light theme) |
+| ![state-session-failover-light.png](state-session-failover-light.png) | Session transcript: the failover popover lists every provider attempt and its outcome (light theme) |
+| ![state-session-ended-light.png](state-session-ended-light.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (light theme) |
+| ![state-sessions-search-light.png](state-sessions-search-light.png) | Sessions: full-text search for "sunset" (light theme) |
+| ![state-sessions-standalone-light.png](state-sessions-standalone-light.png) | Sessions: one-shot helper calls are hidden by default and shown with a Standalone badge (light theme) |
+| ![state-sessions-bulk-delete-light.png](state-sessions-bulk-delete-light.png) | Sessions: bulk delete confirmation stating the deletion is permanent (light theme) |
 | ![state-command-palette-light.png](state-command-palette-light.png) | Ctrl+K command palette listing every page (light theme) |
 | ![overview-dashboard-dark.png](overview-dashboard-dark.png) | Overview / Dashboard: Active sessions, usage, failovers and provider health at a glance. (dark theme) |
 | ![conversations-sessions-dark.png](conversations-sessions-dark.png) | Conversations / Sessions: Browse conversation sessions and read full transcripts. (dark theme) |
@@ -34,4 +42,12 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-test-result-dark.png](state-provider-test-result-dark.png) | Providers: test connection result with latency and model count (dark theme) |
 | ![state-route-editor-dark.png](state-route-editor-dark.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (dark theme) |
 | ![state-api-key-created-dark.png](state-api-key-created-dark.png) | API Keys: the full key is shown exactly once, with a copy button (dark theme) |
+| ![state-session-detail-dark.png](state-session-detail-dark.png) | Session transcript: header, collapsible system prompt, expanded thinking blocks and Markdown replies (dark theme) |
+| ![state-session-detail-full-dark.png](state-session-detail-full-dark.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (dark theme) |
+| ![state-session-tool-card-dark.png](state-session-tool-card-dark.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (dark theme) |
+| ![state-session-failover-dark.png](state-session-failover-dark.png) | Session transcript: the failover popover lists every provider attempt and its outcome (dark theme) |
+| ![state-session-ended-dark.png](state-session-ended-dark.png) | Session transcript: a session an admin ended (no Live indicator, End session disabled) (dark theme) |
+| ![state-sessions-search-dark.png](state-sessions-search-dark.png) | Sessions: full-text search for "sunset" (dark theme) |
+| ![state-sessions-standalone-dark.png](state-sessions-standalone-dark.png) | Sessions: one-shot helper calls are hidden by default and shown with a Standalone badge (dark theme) |
+| ![state-sessions-bulk-delete-dark.png](state-sessions-bulk-delete-dark.png) | Sessions: bulk delete confirmation stating the deletion is permanent (dark theme) |
 | ![state-command-palette-dark.png](state-command-palette-dark.png) | Ctrl+K command palette listing every page (dark theme) |

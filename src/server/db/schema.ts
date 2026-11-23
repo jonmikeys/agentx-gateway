@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -120,15 +121,108 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
+/** Postgres `tsvector`; only ever produced by a generated column, never written by the app. */
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
+export type SessionStatus = "active" | "expired" | "ended";
+export type SessionEndReason = "idle" | "admin" | "agent_changed" | (string & {});
+
 /**
- * One row per client LLM request. Never stores message content. G3 adds nullable
- * `session_id` / `turn_id` columns.
+ * One conversation, identified by the `X-Session-Id` the client echoes. `agent_id` and
+ * `agent_version` are filled from G7a. `standalone` marks one-shot helper calls.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    apiKeyId: uuid("api_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+    routeSlug: text("route_slug"),
+    agentId: text("agent_id"),
+    agentVersion: integer("agent_version"),
+    status: text("status").$type<SessionStatus>().notNull().default("active"),
+    endReason: text("end_reason").$type<SessionEndReason>(),
+    standalone: boolean("standalone").notNull().default(false),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    turnCount: integer("turn_count").notNull().default(0),
+    systemPromptHash: text("system_prompt_hash"),
+  },
+  (table) => [
+    index("sessions_status_activity_idx").on(table.status, table.lastActivityAt),
+    index("sessions_started_at_idx").on(table.startedAt),
+    index("sessions_api_key_idx").on(table.apiKeyId),
+  ],
+);
+
+/** A user turn: starts at a user message and includes any client tool rounds that follow. */
+export const turns = pgTable(
+  "turns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("turns_session_seq_idx").on(table.sessionId, table.seq)],
+);
+
+export type TranscriptItemKind =
+  | "system_prompt"
+  | "user_message"
+  | "assistant_message"
+  | "reasoning"
+  | "tool_call"
+  | "tool_result"
+  | "error";
+
+/** Transcript content. Never logged. `search` is a generated tsvector for full-text search. */
+export const transcriptItems = pgTable(
+  "transcript_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    turnId: uuid("turn_id")
+      .notNull()
+      .references(() => turns.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    kind: text("kind").$type<TranscriptItemKind>().notNull(),
+    content: text("content").notNull().default(""),
+    toolCallId: text("tool_call_id"),
+    toolName: text("tool_name"),
+    toolArgs: jsonb("tool_args").$type<unknown>(),
+    toolSource: text("tool_source").$type<"client" | "mcp">(),
+    llmRequestId: uuid("llm_request_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    search: tsvector("search").generatedAlwaysAs(sql`to_tsvector('english', content)`),
+  },
+  (table) => [
+    index("transcript_items_session_seq_idx").on(table.sessionId, table.seq),
+    index("transcript_items_turn_idx").on(table.turnId),
+    index("transcript_items_search_idx").using("gin", table.search),
+  ],
+);
+
+/**
+ * One row per client LLM request. Never stores message content. `session_id` / `turn_id`
+ * link it to the transcript (cascade on session delete).
  */
 export const llmRequests = pgTable(
   "llm_requests",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     apiKeyId: uuid("api_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+    sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+    turnId: uuid("turn_id").references(() => turns.id, { onDelete: "cascade" }),
     routeSlug: text("route_slug"),
     providerId: uuid("provider_id").references(() => providers.id, { onDelete: "set null" }),
     upstreamModel: text("upstream_model"),
@@ -145,5 +239,6 @@ export const llmRequests = pgTable(
   (table) => [
     index("llm_requests_started_at_idx").on(table.startedAt),
     index("llm_requests_api_key_idx").on(table.apiKeyId),
+    index("llm_requests_session_idx").on(table.sessionId),
   ],
 );

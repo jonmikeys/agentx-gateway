@@ -1,5 +1,8 @@
-import { PagePlaceholder } from "@/components/app-shell/page-placeholder";
+import { SettingsView } from "@/app/(crm)/settings/settings-view";
+import { getSessionSettings } from "@/server/services/session-settings";
 
-export default function Page() {
-  return <PagePlaceholder href="/settings" />;
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  return <SettingsView initial={await getSessionSettings()} />;
 }

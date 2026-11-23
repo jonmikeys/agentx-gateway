@@ -22,6 +22,8 @@ shadcn conventions; no one-off colours or pixel hacks.
   a key label with emoji. User text in tables goes through `TruncatedText` (ellipsis plus a tooltip
   with the full value); text in dialogs wraps (`break-words` or `break-all` for tokens and URLs).
 - **Names**: every icon-only button has an `aria-label`; badges never wrap (`whitespace-nowrap`).
+- **Charts**: series colours come from the `--chart-1..5` theme tokens (distinct hues, at least 3:1 against the card in both themes). Never use one grey for two series, and never colour with `--primary`.
+- **Scrollable regions**: a horizontally scrolling table is focusable (built into `Table`) so keyboard users can scroll it; popovers and dialogs need an accessible name.
 - **Toasts** do not cover the header controls.
 - **Motion**: honours `prefers-reduced-motion` (global rule in `src/app/globals.css`).
 
@@ -34,13 +36,13 @@ E2E_ADMIN_USERNAME=<ADMIN_USERNAME> E2E_ADMIN_PASSWORD=<ADMIN_PASSWORD> pnpm tes
 
 `E2E_BASE_URL` (default `http://localhost:3000`) selects another port. `e2e/layout.spec.ts` seeds
 long-named providers, a 10-step route and an emoji-labelled key through the admin API (idempotent,
-reusing rows by name), then for each page in `src/components/app-shell/nav.ts` at 1440 and 390 px:
+reusing rows by name; `e2e/layout-seed.ts` runs once as Playwright global setup, so parallel workers never race, and creates fresh sessions each run through the real gateway: a long failover conversation with nasty text, reasoning, tool-call and ended sessions), then for each page in `src/components/app-shell/nav.ts` at 1440 and 390 px:
 
 - no horizontal page scroll (`scrollWidth <= innerWidth`);
 - every button and link has an accessible name;
 - axe-core (`@axe-core/playwright`) reports no serious or critical violations, light and dark;
 
-and for the provider, route, API key and palette dialogs: no visible descendant extends past the
+and for the sessions list (bulk-delete confirmation, filters), every transcript scenario (chat, reasoning, tools, ended; Live indicator or its absence), the failover popover and the end and delete confirmations, plus the provider, route, API key and palette dialogs: no visible descendant extends past the
 dialog box, only one dialog is open after creating a key, Escape closes it and focus returns to
 the opener. New pages are covered automatically because the spec iterates `allPages`; add new
 dialogs to the dialog tests.
@@ -55,6 +57,6 @@ E2E_BASE_URL=http://localhost:3200 MOCK_UPSTREAM_PORT=4110 \
 E2E_ADMIN_USERNAME=<ADMIN_USERNAME> E2E_ADMIN_PASSWORD=<ADMIN_PASSWORD> pnpm screenshots
 ```
 
-Animations are disabled, dialogs are awaited until fully open with nothing closing behind them,
-the seed reuses existing rows, and the "API key created" capture mocks the create response so no
+Captures start at the top, full-page captures grow the viewport to the document height (the sidebar is `position: fixed`, so a native fullPage capture would leave it short), animations are disabled, dialogs are awaited until fully open with nothing closing behind them,
+the seed reuses providers and routes, removes the previous run's sessions, request log and demo key before recreating them (it reads `E2E_DATABASE_URL` or `DATABASE_URL`), and the "API key created" capture mocks the create response so no
 extra keys are stored. Open the PNGs and review them against the checklist above.
