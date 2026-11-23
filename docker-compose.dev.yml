@@ -1,0 +1,22 @@
+# Postgres only, for local `pnpm dev`:
+#   docker compose -f docker-compose.dev.yml up -d
+#   DATABASE_URL=postgres://agentx:agentx@localhost:5432/agentx
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: agentx
+      POSTGRES_PASSWORD: agentx
+      POSTGRES_DB: agentx
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentx -d agentx"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-dev-data:
