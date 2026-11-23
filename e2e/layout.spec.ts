@@ -1,4 +1,4 @@
-import AxeBuilder from "@axe-core/playwright";
+﻿import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { allPages } from "../src/components/app-shell/nav";
 import { makePng } from "../tests/support/media-files";
@@ -30,6 +30,7 @@ const themes = ["light", "dark"] as const;
 const runId = Date.now().toString(36);
 
 const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
+const agentFlowId = process.env.LAYOUT_QA_FLOW_ID ?? "";
 
 // Reduced motion: dialogs fade in, and axe would sample half-transparent text mid-animation.
 test.use({ httpCredentials: { username, password }, reducedMotion: "reduce" });
@@ -450,6 +451,52 @@ for (const viewport of viewports) {
       await expect(remove).toBeFocused();
     });
 
+    test("chatflow editor: layout, dialogs and test drawer", async ({ page }) => {
+      await openPage(page, `/chatflows/${agentFlowId}`);
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+
+      const publish = page.getByRole("button", { name: "Publish", exact: true });
+      await publish.click();
+      await expect(page.getByText("Validation passed.")).toBeVisible();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(publish).toBeFocused();
+
+      const versions = page.getByRole("button", { name: "Versions", exact: true });
+      await versions.click();
+      await expect(page.getByRole("heading", { name: "Version history" })).toBeVisible();
+      await expectDialogContained(page);
+      await expectNoSeriousAxeViolations(page, '[role="dialog"]');
+      await page.keyboard.press("Escape");
+      await expect(versions).toBeFocused();
+
+      const settings = page.getByRole("button", { name: "Settings", exact: true });
+      await settings.click();
+      await expect(page.getByLabel("Name")).toBeVisible();
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+      await settings.click();
+
+      const openDrawer = page.getByRole("button", { name: "Open test drawer" });
+      await openDrawer.click();
+      await expect(page.getByRole("textbox", { name: "Test message" })).toBeVisible();
+      await expectNoHorizontalScroll(page);
+      await expectNamedControls(page);
+      await page.getByRole("button", { name: "Close test drawer" }).click();
+    });
+
+    for (const theme of themes) {
+      test(`chatflow editor: axe, ${theme} theme`, async ({ page }) => {
+        await page.addInitScript((value) => {
+          window.localStorage.setItem("theme", value);
+        }, theme);
+        await openPage(page, `/chatflows/${agentFlowId}`);
+        await expectNoSeriousAxeViolations(page);
+      });
+    }
     test("command palette stays inside the dialog", async ({ page }) => {
       await openPage(page, "/");
       await page.getByRole("button", { name: /Search pages/ }).click();
