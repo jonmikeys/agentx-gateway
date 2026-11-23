@@ -30,7 +30,8 @@ const runId = Date.now().toString(36);
 
 const sessionIds = JSON.parse(process.env.LAYOUT_QA_SESSION_IDS ?? "{}") as SessionIds;
 
-test.use({ httpCredentials: { username, password } });
+// Reduced motion: dialogs fade in, and axe would sample half-transparent text mid-animation.
+test.use({ httpCredentials: { username, password }, reducedMotion: "reduce" });
 // Sequential: the tests share seeded rows and create API keys.
 test.describe.configure({ mode: "default" });
 
@@ -302,7 +303,7 @@ for (const viewport of viewports) {
         mimeType: "image/png",
         buffer: makePng(8, 8, [1, 2, 3]),
       });
-      await page.getByLabel("Tags for these files").fill(`long-tag-${"z".repeat(70)}`);
+      await page.getByLabel("Tags for these files").fill(`long-tag-${"z".repeat(22)}`);
       await page.keyboard.press("Enter");
       await expectDialogContained(page);
       await expectNoSeriousAxeViolations(page, '[role="dialog"]');

@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CameraFormDialog } from "@/app/(crm)/cameras/camera-form-dialog";
 import { PageHeader } from "@/components/crm/page-header";
@@ -161,6 +161,7 @@ function CameraRow({
               size="sm"
               disabled={actions.testing === camera.id}
               aria-label={`Test ${camera.name}`}
+              data-test-camera={camera.id}
               onClick={() => actions.onTest(camera)}
             >
               <Zap />
@@ -282,7 +283,12 @@ export function CamerasView({ cameras }: { cameras: CameraView[] }) {
     }
   }
 
+  // The Test button is disabled and re-rendered while it runs, which drops focus; the result
+  // dialog looks the button up again when it closes.
+  const lastTestedId = useRef<string | undefined>(undefined);
+
   async function runTest(camera: CameraView) {
+    lastTestedId.current = camera.id;
     setTesting(camera.id);
     try {
       const result = await adminFetch<MjpegTestResult>(`cameras/${camera.id}/test`, {
@@ -401,7 +407,14 @@ export function CamerasView({ cameras }: { cameras: CameraView[] }) {
       </Dialog>
 
       <Dialog open={testResult !== undefined} onOpenChange={() => setTestResult(undefined)}>
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            document
+              .querySelector<HTMLElement>(`[data-test-camera="${lastTestedId.current}"]`)
+              ?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {testResult?.result.ok ? (

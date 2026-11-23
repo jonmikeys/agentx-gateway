@@ -2,6 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { makePng } from "../tests/support/media-files";
 import { type MockMjpeg, startMockMjpeg } from "../tests/support/mock-mjpeg";
 
+/**
+ * Functional Media and Cameras flows. Layout, overflow, accessible names, axe and focus return
+ * for these pages and dialogs live in e2e/layout.spec.ts.
+ */
 const username = process.env.E2E_ADMIN_USERNAME ?? process.env.ADMIN_USERNAME ?? "";
 const password = process.env.E2E_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD ?? "";
 const runId = Date.now().toString(36);
@@ -26,41 +30,10 @@ async function openPage(page: Page, href: string, heading: string) {
   await page.waitForLoadState("networkidle");
 }
 
-async function expectNoHorizontalScroll(page: Page) {
-  const { scrollWidth, innerWidth } = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
-  }));
-  expect(scrollWidth, "page scrolls horizontally").toBeLessThanOrEqual(innerWidth);
-}
-
-/** No visible descendant of the open dialog may extend past the dialog's own box. */
-async function expectDialogContained(page: Page) {
-  const dialog = page.locator('[role="dialog"], [role="alertdialog"]').last();
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveAttribute("data-state", "open");
-  const overflowing = await dialog.evaluate((root) => {
-    const box = root.getBoundingClientRect();
-    const found: string[] = [];
-    for (const element of root.querySelectorAll("*")) {
-      if (element.closest('[aria-hidden="true"]')) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (rect.right > box.right + 1 || rect.left < box.left - 1) {
-        found.push(`${element.tagName.toLowerCase()} ${Math.round(rect.right - box.right)}`);
-      }
-    }
-    return found.slice(0, 5);
-  });
-  expect(overflowing, "elements overflow the dialog").toEqual([]);
-  await expectNoHorizontalScroll(page);
-}
-
 test("upload an image, see its card, edit tags and disable it", async ({ page, request }) => {
   await openPage(page, "/media", "Media");
   const opener = page.getByRole("button", { name: "Upload media" }).first();
   await opener.click();
-  await expectDialogContained(page);
   await page.getByTestId("media-file-input").setInputFiles({
     name: `${imageName}.png`,
     mimeType: "image/png",
@@ -84,7 +57,6 @@ test("upload an image, see its card, edit tags and disable it", async ({ page, r
 
   const edit = card.getByRole("button", { name: `Edit ${imageName}` });
   await edit.click();
-  await expectDialogContained(page);
   await page.getByLabel("Description").fill("A blue rectangle for tests");
   await page.getByLabel("Tags").fill("second");
   await page.keyboard.press("Enter");
@@ -125,7 +97,6 @@ test("create an mjpeg camera, test it and preview it", async ({ page, request })
   await openPage(page, "/cameras", "Cameras");
   const opener = page.getByRole("button", { name: "New camera" });
   await opener.click();
-  await expectDialogContained(page);
   await page.getByLabel("Name", { exact: true }).fill(longName);
   await page.getByLabel("Stream URL").fill(camera.streamUrl);
   await page.getByRole("button", { name: "Create camera" }).click();
@@ -136,7 +107,6 @@ test("create an mjpeg camera, test it and preview it", async ({ page, request })
 
   await row.getByRole("button", { name: /^Test / }).click();
   await expect(page.getByRole("heading", { name: "Camera test passed" })).toBeVisible();
-  await expectDialogContained(page);
   await page.keyboard.press("Escape");
 
   const preview = row.getByRole("button", { name: /^Preview / });
@@ -146,7 +116,6 @@ test("create an mjpeg camera, test it and preview it", async ({ page, request })
   await expect
     .poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth))
     .toBeGreaterThan(0);
-  await expectDialogContained(page);
   await page.keyboard.press("Escape");
 
   const list = await (await request.get("/api/admin/cameras")).json();
@@ -168,38 +137,3 @@ test("look-at cameras explain that preview is unavailable", async ({ page, reque
   await page.keyboard.press("Escape");
   await request.delete(`/api/admin/cameras/${id}`);
 });
-
-for (const width of [1440, 390]) {
-  test(`media and camera pages do not scroll horizontally at ${width}px`, async ({
-    page,
-    request,
-  }) => {
-    await page.setViewportSize({ width, height: 900 });
-    const name = `E2E layout ${"very long name ".repeat(6)}${runId}`;
-    const media = await request.post("/api/admin/media", {
-      data: { name, external_url: `${camera.url}/none`, tags: ["layout"] },
-    });
-    // The external check fails for a non-media URL; the layout run still covers empty states.
-    expect([201, 400, 415]).toContain(media.status());
-    const created = await request.post("/api/admin/cameras", {
-      data: { type: "mjpeg_url", name, url: `${camera.url}/${"p".repeat(120)}` },
-    });
-    expect(created.status()).toBe(201);
-    for (const [href, heading] of [
-      ["/media", "Media"],
-      ["/cameras", "Cameras"],
-    ]) {
-      await openPage(page, href, heading);
-      await expectNoHorizontalScroll(page);
-      const unnamed = (await page.locator("body").ariaSnapshot())
-        .split("\n")
-        .filter((line) => /^\s*- (button|link)(\s+\[[^\]]*\])*:?\s*$/.test(line));
-      expect(unnamed, "buttons or links without an accessible name").toEqual([]);
-    }
-    await page.getByRole("button", { name: `Edit ${name}` }).click();
-    await expectDialogContained(page);
-    await page.keyboard.press("Escape");
-    const { id } = await created.json();
-    await request.delete(`/api/admin/cameras/${id}`);
-  });
-}

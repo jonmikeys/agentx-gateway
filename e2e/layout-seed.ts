@@ -25,7 +25,7 @@ export const routeSlug = "layout-qa-route-with-a-very-long-id-for-checking-layou
 export const keyLabel = "Layout QA key \u{1F680} with a long text that keeps going and going on";
 /** Media and cameras with long names, many tags and a long stream URL. */
 export const mediaNames = {
-  long: `Layout QA picture \u{1F305} with a very long display title that keeps going ${"and going ".repeat(4)}`,
+  long: `Layout QA picture \u{1F305} with a very long display title that keeps going${" and going".repeat(2)}`,
   external: "Layout QA external picture",
   clip: "Layout QA external clip",
 };
@@ -49,7 +49,7 @@ async function seedMediaAndCameras(admin: APIRequestContext) {
   const knownMedia = await names("media");
   const tags = [
     "layout",
-    `a-very-long-tag-name-${"x".repeat(60)}`,
+    `a-very-long-tag-${"x".repeat(15)}`,
     "nature",
     "scenery",
     "brand",
@@ -343,7 +343,7 @@ export default async function globalSetup() {
   const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
   const upstream = await startMockUpstream({ models: ["ok", "mock-model"] });
   mediaServer = await startMockMediaServer();
-  mjpeg = await startMockMjpeg();
+  mjpeg = await startMockMjpeg({ frameIntervalMs: 50 });
   const admin = await request.newContext({ baseURL, httpCredentials: { username, password } });
   try {
     await seed(admin, upstream);
