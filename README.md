@@ -8,8 +8,8 @@ Status: under construction. G1 (scaffold) provides the admin console shell, auth
 database, encrypted secrets and `/health`. G2 (routing core) adds the OpenAI-compatible
 `/v1/models` and `/v1/chat/completions` with provider failover. G3 (sessions) adds the
 `X-Session-Id` session contract, transcript capture and the Sessions, Dashboard and Settings
-pages. See [docs/spec.md](docs/spec.md)
-for the agreed design.
+pages. G4 adds the Responses API, G5 media and cameras, and G6 the MCP registry and tool loop.
+See [docs/spec.md](docs/spec.md) for the agreed design.
 
 ## Features
 
@@ -31,6 +31,10 @@ for the agreed design.
   from the bytes) or external URLs, served to Unity with HTTP `Range` support at
   `/v1/media`, plus MJPEG camera catalogue with encrypted credentials at `/v1/cameras`.
   See [docs/media-content.md](docs/media-content.md).
+- **MCP servers and tools** (G6): register Streamable HTTP/SSE MCP servers, browse and allowlist
+  tools, and let plain chats call them. The gateway executes MCP calls, loops (max four rounds),
+  keeps Unity tools client-side, and re-injects mixed-round MCP messages on the next request.
+  See [docs/mcp.md](docs/mcp.md).
 - **Dashboard** with sessions, turns, tokens, failovers and provider latency.
 - **Request log** (timings, attempts, token usage; never message content).
 - Admin console with Basic auth, dark/light themes and a Ctrl+K command palette
