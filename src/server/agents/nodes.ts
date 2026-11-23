@@ -4,6 +4,7 @@ import {
   type ClientToolDefinition,
   type ClientToolRestrictions,
   type ClientToolResult,
+  clientActionProblem,
   parseToolResultContent,
   renderClientActionArgs,
   restrictClientTools,
@@ -11,7 +12,15 @@ import {
   toolResultFailed,
   UNRESTRICTED,
 } from "@/lib/agents/client-tools";
-import { type FlowGraph, type FlowNode, isFallibleNode, nodeHandles } from "@/lib/agents/graph";
+import {
+  type FlowGraph,
+  type FlowNode,
+  isFallibleNode,
+  nodeHandles,
+  type SubflowParamType,
+  subflowOutputHandle,
+} from "@/lib/agents/graph";
+import { subflowParams } from "@/lib/agents/subflows";
 import { renderTemplate, resolvePath, type TemplateScope } from "@/lib/agents/templates";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { AgentRuntimeError, chatThroughRoute } from "@/server/agents/llm";
@@ -57,7 +66,50 @@ export interface AgentDependencies {
   ) => Promise<{ text: string; isError: boolean }>;
   webhookHeaders: (flowId: string, nodeId: string) => Promise<Record<string, string>>;
   memory: MemoryStore;
+  /** Loads one pinned published subflow version for a Call Subflow node. */
+  loadSubflowVersion: (flowId: string, version: number) => Promise<SubflowVersion | undefined>;
   fetchImpl?: typeof fetch;
+}
+
+/** A published subflow version plus the subflows it pins, as the runtime needs it. */
+export interface SubflowVersion {
+  flowId: string;
+  version: number;
+  graph: FlowGraph;
+  pinnedSubflows: Record<string, number>;
+}
+
+export interface SubflowRunRequest {
+  subflow: SubflowVersion;
+  /** Coerced Subflow Input params; they become the subflow's own vars. */
+  inputs: Record<string, unknown>;
+  /** Shared with the parent: session memory, conversation history and the user text. */
+  sessionId: string;
+  memory: Record<string, unknown>;
+  messages: unknown[];
+  inputText: string;
+  parent: { flowId: string; version: number; depth: number };
+  /** The Call Subflow node id (part of the nested checkpoint thread id). */
+  nodeId: string;
+  /** The caller's checkpoint thread; the subflow checkpoints under a child of it. */
+  threadId: string;
+  /** When true, discard any leftover checkpoint for this call before starting fresh. */
+  reset: boolean;
+  /** Client tool results to deliver when resuming a paused subflow. */
+  resume?: ClientToolResult[];
+}
+
+export interface SubflowRunResult {
+  /** Label of the Subflow Output the run reached ("" when none). */
+  label: string;
+  values: Record<string, unknown>;
+  memory: Record<string, unknown>;
+  text: string;
+  reasoning: string;
+  usage?: TokenUsage;
+  steps: RunTraceStep[];
+  /** Set when the subflow paused on a client tool; the caller must pause too. */
+  paused?: { calls: ClientToolCall[] };
 }
 
 export interface AgentRunContext {
@@ -80,6 +132,14 @@ export interface AgentRunContext {
   onNodeStart?: (node: FlowNode) => void;
   onNodeEnd?: (step: RunTraceStep) => void;
   signal: AbortSignal;
+  /** The checkpoint thread this graph runs under (session id at the top level). */
+  threadId: string;
+  /** Pins captured by the running flow version (subflow id -> version). */
+  pinnedSubflows: Record<string, number>;
+  /** 0 for the top-level flow, 1 inside the first nested subflow, and so on. */
+  depth: number;
+  /** Executes a nested subflow; supplied by the runtime (keeps this module cycle-free). */
+  runSubflow?: (request: SubflowRunRequest) => Promise<SubflowRunResult>;
 }
 
 export interface NodeOutcome {
@@ -100,6 +160,10 @@ export interface NodeOutcome {
   emittedText?: string;
   reasoning?: string;
   usage?: TokenUsage;
+  /** Nested subflow trace, attached to this node's step. */
+  steps?: RunTraceStep[];
+  /** Set by a Subflow Output node to end the subflow on a named branch. */
+  subflowOutput?: { label: string; values: Record<string, unknown> };
 }
 
 export function addUsage(
@@ -552,6 +616,8 @@ async function executeMcpTool(
 /**
  * Client Action: emits one fixed Unity tool call and pauses for the result, or (when resumed)
  * stores the result in its variable and follows `error` when the client reported `ok: false`.
+ * The calling agent's media/camera restrictions are enforced here too, so they also cover Client
+ * Action nodes inside called subflows (where publish-time validation only sees the subflow).
  */
 async function executeClientAction(
   node: Extract<FlowNode, { type: "client_action" }>,
@@ -576,6 +642,12 @@ async function executeClientAction(
     templateScope(state, context.inputText),
   );
   if (!rendered.ok) throw new AgentRuntimeError("client_action_invalid_args", rendered.error);
+  const restriction = clientActionProblem(
+    node.data.toolName,
+    rendered.value,
+    context.clientRestrictions ?? UNRESTRICTED,
+  );
+  if (restriction) throw new AgentRuntimeError("client_action_restricted", restriction);
   const call: ClientToolCall = {
     id: `call_${randomUUID()}`,
     name: node.data.toolName,
@@ -586,6 +658,141 @@ async function executeClientAction(
     next: "out",
     pendingClientNode: node.id,
     pendingClientCalls: [call],
+  };
+}
+
+const MAX_SUBFLOW_DEPTH = 5;
+
+function coerceInput(raw: string, type: SubflowParamType): unknown {
+  switch (type) {
+    case "number": {
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : raw;
+    }
+    case "boolean":
+      return raw.trim().toLowerCase() === "true" || raw.trim() === "1";
+    case "json": {
+      try {
+        return JSON.parse(raw) as unknown;
+      } catch {
+        return raw;
+      }
+    }
+    default:
+      return raw;
+  }
+}
+
+async function executeCallSubflow(
+  node: Extract<FlowNode, { type: "call_subflow" }>,
+  state: AgentState,
+  context: AgentRunContext,
+): Promise<NodeOutcome> {
+  const targetId = node.data.subflowId;
+  if (!targetId) {
+    throw new AgentRuntimeError("subflow_missing", "Choose a subflow to call.");
+  }
+  const pinned = context.pinnedSubflows[targetId];
+  if (pinned === undefined) {
+    throw new AgentRuntimeError(
+      "subflow_not_pinned",
+      "This subflow has no pinned version; publish the calling flow first.",
+    );
+  }
+  const subflow = await context.deps.loadSubflowVersion(targetId, pinned);
+  if (!subflow) {
+    throw new AgentRuntimeError(
+      "subflow_not_found",
+      `Pinned subflow version v${pinned} is not available.`,
+    );
+  }
+  const params = subflowParams(subflow.graph);
+  const templates = new Map(node.data.inputs.map((input) => [input.name, input.value]));
+  const inputs: Record<string, unknown> = {};
+  for (const param of params) {
+    const template = templates.get(param.name);
+    if (template === undefined) {
+      if (param.required) {
+        throw new AgentRuntimeError(
+          "subflow_input_missing",
+          `Missing required input "${param.name}".`,
+        );
+      }
+      continue;
+    }
+    inputs[param.name] = coerceInput(render(template, state, context.inputText), param.type);
+  }
+  if (!context.runSubflow) {
+    throw new AgentRuntimeError(
+      "subflow_runtime_unavailable",
+      "Subflow execution is not available in this run.",
+    );
+  }
+  if (context.depth + 1 > MAX_SUBFLOW_DEPTH) {
+    throw new AgentRuntimeError(
+      "subflow_too_deep",
+      `Subflows cannot nest deeper than ${MAX_SUBFLOW_DEPTH} levels.`,
+    );
+  }
+  // A client-tool pause inside the subflow surfaces as a pause of this node: the run stops, the
+  // client gets the calls, and the next request delivers the results back through here.
+  const resuming = state.clientResultsNode === node.id && state.clientResults.length > 0;
+  const result = await context.runSubflow({
+    subflow,
+    inputs,
+    sessionId: context.sessionId,
+    memory: state.memory,
+    messages: state.messages,
+    inputText: context.inputText,
+    parent: { flowId: context.flowId, version: context.version, depth: context.depth },
+    nodeId: node.id,
+    threadId: context.threadId,
+    reset: !resuming,
+    resume: resuming ? state.clientResults : undefined,
+  });
+  if (result.paused) {
+    return {
+      output: { paused: true, calls: result.paused.calls },
+      next: "out",
+      pendingClientNode: node.id,
+      pendingClientCalls: result.paused.calls,
+      ...(resuming ? { clientResults: [] as ClientToolResult[], clientResultsNode: "" } : {}),
+    };
+  }
+  const mapping = node.data.outputs.find((output) => output.label === result.label);
+  if (!mapping) {
+    throw new AgentRuntimeError(
+      "subflow_output_unmapped",
+      `The subflow returned "${result.label}", which has no output mapping.`,
+    );
+  }
+  const keys = Object.keys(result.values);
+  const value = keys.length === 1 ? result.values[keys[0]] : result.values;
+  return {
+    next: subflowOutputHandle(result.label),
+    vars: { [mapping.variable]: value },
+    memory: result.memory,
+    output: value,
+    emittedText: result.text,
+    reasoning: result.reasoning,
+    usage: result.usage,
+    steps: result.steps,
+  };
+}
+
+async function executeSubflowOutput(
+  node: Extract<FlowNode, { type: "subflow_output" }>,
+  state: AgentState,
+  context: AgentRunContext,
+): Promise<NodeOutcome> {
+  const values: Record<string, unknown> = {};
+  for (const entry of node.data.values) {
+    values[entry.name] = render(entry.value, state, context.inputText);
+  }
+  return {
+    next: "out",
+    output: values,
+    subflowOutput: { label: node.data.label, values },
   };
 }
 
@@ -626,6 +833,12 @@ export async function executeNode(
       return executeReply(node, state, context);
     case "end":
       return { next: "out" };
+    case "subflow_input":
+      return { next: "out" };
+    case "subflow_output":
+      return executeSubflowOutput(node, state, context);
+    case "call_subflow":
+      return executeCallSubflow(node, state, context);
   }
 }
 

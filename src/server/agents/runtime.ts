@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Command } from "@langchain/langgraph";
+import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
+import { Command, isGraphInterrupt } from "@langchain/langgraph";
 import type {
   ClientToolCall,
   ClientToolDefinition,
@@ -13,6 +14,7 @@ import {
   type AgentSnapshot,
   type CompiledAgent,
   compileAgentGraph,
+  compileSubflowGraph,
 } from "@/server/agents/compiler";
 import { withAgentDependencies } from "@/server/agents/deps";
 import { AgentRuntimeError } from "@/server/agents/llm";
@@ -20,6 +22,8 @@ import {
   type AgentDependencies,
   type AgentRunContext,
   computeTerminalLlmNodes,
+  type SubflowRunRequest,
+  type SubflowRunResult,
 } from "@/server/agents/nodes";
 import type { TokenUsage } from "@/server/db/schema";
 import { parseToolArguments } from "@/server/gateway/transcript/diff";
@@ -39,6 +43,8 @@ export interface RunAgentOptions {
   /** Route used by `inherit` nodes (the request route or the agent default route). */
   route: ResolvedRoute | undefined;
   signal: AbortSignal;
+  /** Subflow pins of the running version; the top-level agent passes its published pins. */
+  pinnedSubflows?: Record<string, number>;
   deps?: Partial<AgentDependencies>;
   /** Function tools the client sent with the request (offered by LLM nodes that select them). */
   clientTools?: ClientToolDefinition[];
@@ -152,6 +158,39 @@ function toCapturedCalls(calls: ClientToolCall[]): CapturedToolCall[] {
   }));
 }
 
+/** Empty initial channel values for one graph thread (both agent and subflow channels). */
+function initialState(
+  options: {
+    messages: unknown[];
+    sessionId: string;
+    vars: Record<string, unknown>;
+    memory: Record<string, unknown>;
+  },
+  trace: RunTraceStep[] = [],
+): Record<string, unknown> {
+  return {
+    messages: options.messages,
+    sessionId: options.sessionId,
+    vars: options.vars,
+    memory: options.memory,
+    output: null,
+    cursor: "out",
+    trace,
+    text: "",
+    reasoning: "",
+    usage: undefined,
+    lastError: "",
+    fatal: false,
+    failedNodeId: null,
+    pendingClientNode: "",
+    pendingClientCalls: [] as ClientToolCall[],
+    clientResults: [] as ClientToolResult[],
+    clientResultsNode: "",
+    outputLabel: "",
+    subflowOutput: {},
+  };
+}
+
 /**
  * Runs one published agent graph for a request: loads session memory, invokes the compiled
  * LangGraph graph (checkpointed by session), streams text as nodes produce it and records the
@@ -172,6 +211,123 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
   };
 
+  const streamText = (delta: string) => {
+    if (delta) emit({ type: "text", delta });
+  };
+
+  /**
+   * Executes a pinned subflow as a nested LangGraph graph under its own child checkpoint thread.
+   * It gets its own vars (the mapped inputs), shares the session memory/conversation, streams its
+   * Replies to the client and returns its trace so the call step can nest it. A client-tool
+   * interrupt raised inside it pauses the whole run: the subflow checkpoint is kept, the parent
+   * pauses on its Call Subflow wait node, and the next request resumes the subflow here.
+   */
+  const runNested = async (request: SubflowRunRequest): Promise<SubflowRunResult> => {
+    const { subflow } = request;
+    const compiled = await compileSubflowGraph(
+      subflow.flowId,
+      subflow.version,
+      subflow.graph,
+      options.checkpointer,
+    );
+    const threadId = `${request.threadId}/${request.nodeId}`;
+    const subContext: AgentRunContext = {
+      flowId: subflow.flowId,
+      version: subflow.version,
+      sessionId: request.sessionId,
+      graph: subflow.graph,
+      inputText: request.inputText,
+      terminalLlmNodes: computeTerminalLlmNodes(subflow.graph),
+      route: options.route,
+      deps,
+      clientTools: options.clientTools ?? [],
+      clientRestrictions: options.clientRestrictions,
+      emitText: streamText,
+      signal: options.signal,
+      threadId,
+      pinnedSubflows: subflow.pinnedSubflows,
+      depth: request.parent.depth + 1,
+      runSubflow: runNested,
+    };
+    const config = {
+      recursionLimit: 50,
+      configurable: { thread_id: threadId, agentContext: subContext },
+    };
+    // A fresh call site must not inherit a leftover paused checkpoint from an abandoned run.
+    if (request.reset) await deleteThread(options.checkpointer, threadId);
+
+    let input: unknown = initialState({
+      messages: request.messages,
+      sessionId: request.sessionId,
+      vars: request.inputs,
+      memory: request.memory,
+    });
+    // Run the subflow as its own top-level graph. Without this, LangGraph would see the caller's
+    // ambient `__pregel_read` config and treat the subflow as a *nested* run, where an interrupt is
+    // rethrown (and checkpointed under an ephemeral namespace) instead of pausing this child thread.
+    const isolated = <T>(fn: () => Promise<T>) =>
+      AsyncLocalStorageProviderSingleton.runWithConfig({}, fn);
+    if (request.resume && request.resume.length > 0) {
+      const pausedBefore = await isolated(() => readSnapshot(compiled, config));
+      if (pausedBefore && pausedBefore.next.length > 0 && interruptsOf(pausedBefore).length > 0) {
+        input = new Command({ resume: request.resume });
+      }
+    }
+    let final: Record<string, unknown>;
+    try {
+      final = (await isolated(() =>
+        compiled.invoke(input as Partial<Record<string, unknown>>, config),
+      )) as Record<string, unknown>;
+    } catch (error) {
+      // Defensive: if an interrupt still surfaces as an exception, keep the checkpoint and pause.
+      const thrown = interruptFromError(error);
+      const snapshot = thrown ? await isolated(() => readSnapshot(compiled, config)) : undefined;
+      const pending = interruptsOf(snapshot)[0] ?? thrown;
+      if (!pending) throw error;
+      return {
+        label: "",
+        values: {},
+        memory: (snapshot?.values?.memory as Record<string, unknown>) ?? {},
+        text: "",
+        reasoning: "",
+        steps: [],
+        paused: { calls: pending.calls },
+      };
+    }
+
+    const snapshot = await isolated(() => readSnapshot(compiled, config));
+    const pending = interruptsOf(snapshot)[0] ?? interruptFromFinal(final);
+    if (pending) {
+      return {
+        label: "",
+        values: {},
+        memory: (final.memory as Record<string, unknown>) ?? {},
+        text: typeof final.text === "string" ? final.text : "",
+        reasoning: typeof final.reasoning === "string" ? final.reasoning : "",
+        usage: final.usage as TokenUsage | undefined,
+        steps: (final.trace as RunTraceStep[] | undefined) ?? [],
+        paused: { calls: pending.calls },
+      };
+    }
+    if (final.fatal) {
+      await deleteThread(options.checkpointer, threadId);
+      throw new AgentRuntimeError(
+        "subflow_failed",
+        (final.lastError as string) || "The subflow run failed.",
+      );
+    }
+    await deleteThread(options.checkpointer, threadId);
+    return {
+      label: (final.outputLabel as string) ?? "",
+      values: (final.subflowOutput as Record<string, unknown>) ?? {},
+      memory: final.memory as Record<string, unknown>,
+      text: (final.text as string) ?? "",
+      reasoning: (final.reasoning as string) ?? "",
+      usage: final.usage as TokenUsage | undefined,
+      steps: (final.trace as RunTraceStep[] | undefined) ?? [],
+    };
+  };
+
   try {
     const memory = await deps.memory.load(options.sessionId);
     const context: AgentRunContext = {
@@ -185,9 +341,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       deps,
       clientTools: options.clientTools ?? [],
       clientRestrictions: options.clientRestrictions,
-      emitText: (delta) => {
-        if (delta) emit({ type: "text", delta });
-      },
+      emitText: streamText,
       onNodeStart: (node) =>
         emit({ type: "node_start", nodeId: node.id, nodeType: node.type, title: node.data.title }),
       onNodeEnd: (step) =>
@@ -199,6 +353,10 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
           error: step.error,
         }),
       signal: options.signal,
+      threadId: options.sessionId,
+      pinnedSubflows: options.pinnedSubflows ?? {},
+      depth: 0,
+      runSubflow: runNested,
     };
 
     const compiled = await compileAgentGraph(
@@ -211,25 +369,12 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       recursionLimit: 50,
       configurable: { thread_id: options.sessionId, agentContext: context },
     };
-    const initial = {
+    const initial = initialState({
       messages: options.messages,
       sessionId: options.sessionId,
       vars: {},
       memory,
-      output: null,
-      cursor: "out",
-      trace: [] as RunTraceStep[],
-      text: "",
-      reasoning: "",
-      usage: undefined,
-      lastError: "",
-      fatal: false,
-      failedNodeId: null,
-      pendingClientNode: "",
-      pendingClientCalls: [] as ClientToolCall[],
-      clientResults: [] as ClientToolResult[],
-      clientResultsNode: "",
-    };
+    });
 
     let input: unknown = initial;
     const pausedBefore = await readSnapshot(compiled, config);
@@ -338,9 +483,22 @@ function interruptFromFinal(final: Record<string, unknown>): ClientToolInterrupt
   return undefined;
 }
 
-async function deleteThread(injected: unknown, sessionId: string): Promise<void> {
+/** A nested graph rethrows its interrupt; pull the client-tool pause out of it. */
+function interruptFromError(error: unknown): ClientToolInterrupt | undefined {
+  if (!isGraphInterrupt(error)) return undefined;
+  const entries = (error as { interrupts?: { value?: unknown }[] }).interrupts ?? [];
+  for (const entry of entries) {
+    const value = entry.value as Partial<ClientToolInterrupt> | undefined;
+    if (value?.kind === "client_tools" && Array.isArray(value.calls)) {
+      return value as ClientToolInterrupt;
+    }
+  }
+  return undefined;
+}
+
+async function deleteThread(injected: unknown, threadId: string): Promise<void> {
   const saver = (injected ?? (await getCheckpointer())) as
     | { deleteThread?: (threadId: string) => Promise<void> }
     | undefined;
-  if (saver?.deleteThread) await saver.deleteThread(sessionId);
+  if (saver?.deleteThread) await saver.deleteThread(threadId);
 }

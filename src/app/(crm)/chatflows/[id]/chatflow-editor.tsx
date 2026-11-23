@@ -56,11 +56,11 @@ import {
   createFlowNode,
   type FlowNode,
   type NodeType,
-  nodeCatalog,
+  nodeCatalogFor,
   nodeHandles,
 } from "@/lib/agents/graph";
 import { variableSuggestions } from "@/lib/agents/templates";
-import type { FlowDetail } from "@/lib/agents/types";
+import type { FlowDetail, SubflowOption } from "@/lib/agents/types";
 import { problemsByNode, validateGraph } from "@/lib/agents/validate";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +75,9 @@ const nodeTypes = {
   client_action: FlowNodeCard,
   reply: FlowNodeCard,
   end: FlowNodeCard,
+  subflow_input: FlowNodeCard,
+  subflow_output: FlowNodeCard,
+  call_subflow: FlowNodeCard,
 };
 
 const nodeIcon = (type: NodeType) => {
@@ -97,6 +100,7 @@ interface ChatflowEditorProps {
   media: { id: string; name: string; kind: string; tags: string[] }[];
   mediaTags: string[];
   cameras: { id: string; name: string; enabled: boolean }[];
+  subflows: SubflowOption[];
 }
 
 function variableNames(nodes: EditorNode[]): string[] {
@@ -107,6 +111,11 @@ function variableNames(nodes: EditorNode[]): string[] {
     if (Array.isArray(data.assignments)) {
       for (const assignment of data.assignments as { key?: unknown }[]) {
         if (typeof assignment.key === "string") names.add(assignment.key);
+      }
+    }
+    if (Array.isArray(data.outputs)) {
+      for (const output of data.outputs as { variable?: unknown }[]) {
+        if (typeof output.variable === "string") names.add(output.variable);
       }
     }
   }
@@ -122,6 +131,7 @@ export function ChatflowEditor({
   media,
   mediaTags,
   cameras,
+  subflows,
 }: ChatflowEditorProps) {
   const router = useRouter();
   const [flow, setFlow] = useState(initialFlow);
@@ -157,6 +167,23 @@ export function ChatflowEditor({
     [nodes],
   );
   const selected = nodes.find((node) => node.selected);
+
+  // "Update available" for Call Subflow nodes whose target gained a published version since the
+  // version this flow currently pins.
+  const nodeBadges = useMemo(() => {
+    const badges = new Map<string, string>();
+    for (const node of nodes) {
+      if (node.type !== "call_subflow") continue;
+      const subflowId = (node.data as { subflowId?: string | null }).subflowId;
+      if (!subflowId) continue;
+      const latest = subflows.find((entry) => entry.id === subflowId)?.version;
+      const pinned = flow.pinned_subflows[subflowId];
+      if (latest !== undefined && pinned !== undefined && latest > pinned) {
+        badges.set(node.id, `Update v${pinned} → v${latest}`);
+      }
+    }
+    return badges;
+  }, [nodes, subflows, flow.pinned_subflows]);
 
   function pushHistory() {
     past.current.push({ nodes, edges });
@@ -196,7 +223,7 @@ export function ChatflowEditor({
     const editorNode = toEditorNodes({ nodes: [created], edges: [] })[0];
     pushHistory();
     let nextEdges = edges;
-    if (anchor && anchor.type !== "end" && type !== "start") {
+    if (anchor && anchor.type !== "end" && anchor.type !== "subflow_output" && type !== "start") {
       const anchorFlow = {
         id: anchor.id,
         type: anchor.type,
@@ -380,7 +407,7 @@ export function ChatflowEditor({
           <p className="px-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {group}
           </p>
-          {nodeCatalog
+          {nodeCatalogFor(flow.kind)
             .filter((entry) => entry.group === group)
             .map((entry) => {
               const Icon = nodeIcon(entry.type);
@@ -414,6 +441,7 @@ export function ChatflowEditor({
       cameras={cameras}
       allowedMediaTags={flow.settings.allowed_media_tags ?? []}
       allowedCameraIds={flow.settings.allowed_cameras ?? []}
+      subflows={subflows}
       variables={variables}
       knownNodeIds={knownNodeIds}
       onChange={updateNodeData}
@@ -435,6 +463,7 @@ export function ChatflowEditor({
         problems,
         runningNodeId,
         traceNodeId,
+        nodeBadges,
         onRename: (nodeId, title) =>
           setNodes((current) =>
             current.map((node) =>
@@ -452,6 +481,7 @@ export function ChatflowEditor({
             </Link>
           </Button>
           <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight">{flow.name}</h1>
+          <Badge variant="outline">{flow.kind === "subflow" ? "Subflow" : "Agent"}</Badge>
           <Badge variant="secondary">
             {flow.published_version === null ? "Draft" : `v${flow.published_version}`}
           </Badge>

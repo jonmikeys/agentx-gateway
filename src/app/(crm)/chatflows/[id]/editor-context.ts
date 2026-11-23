@@ -9,6 +9,8 @@ export interface EditorUiContext {
   runningNodeId?: string;
   /** Node picked in the trace tab. */
   traceNodeId?: string;
+  /** Small notices shown on a node card, e.g. a newer pinned subflow version. */
+  nodeBadges?: Map<string, string>;
   onRename: (nodeId: string, title: string) => void;
 }
 

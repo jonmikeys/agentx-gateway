@@ -13,12 +13,14 @@ import { runAgent } from "@/server/agents/runtime";
 import { adminError, handleServiceError, parseBody } from "@/server/api/admin/helpers";
 import { formatSseEvent } from "@/server/gateway/sse";
 import {
+  computePinnedSubflows,
   createFlow,
   deleteFlow,
   duplicateFlow,
   getFlow,
   getVersion,
   listFlows,
+  listSubflowUsage,
   listVersions,
   publishFlow,
   restoreVersion,
@@ -123,6 +125,15 @@ export function createFlowsApp(): Hono {
     }
   });
 
+  /** Published flows (agents and subflows) that call this subflow, with their pinned version. */
+  app.get("/:id/usage", async (c) => {
+    try {
+      return c.json({ data: await listSubflowUsage(c.req.param("id")) });
+    } catch (error) {
+      return handleServiceError(c, error);
+    }
+  });
+
   app.get("/:id/versions", async (c) => {
     try {
       return c.json({ data: await listVersions(c.req.param("id")) });
@@ -183,6 +194,9 @@ export function createFlowsApp(): Hono {
       flowId: flow.id,
       version: flow.published_version ?? 0,
       graph: flow.draft,
+      // A draft test run pins each called subflow at its current published version, exactly like
+      // publishing the draft would.
+      pinnedSubflows: await computePinnedSubflows(flow.draft),
       sessionId: `test-${randomUUID()}`,
       messages,
       inputText: parsed.data.input,

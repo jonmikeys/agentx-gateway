@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { TagsInput } from "@/components/crm/tags-input";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
-import type { FlowDetail } from "@/lib/agents/types";
+import type { FlowDetail, SubflowUsageEntry } from "@/lib/agents/types";
 
 interface SettingsPanelProps {
   flow: FlowDetail;
@@ -38,7 +38,23 @@ export function SettingsPanel({ flow, routes, mediaTags, cameras, onSaved }: Set
   const [allowedTags, setAllowedTags] = useState(flow.settings.allowed_media_tags ?? []);
   const [allowedCameras, setAllowedCameras] = useState(flow.settings.allowed_cameras ?? []);
   const [saving, setSaving] = useState(false);
+  const [usage, setUsage] = useState<SubflowUsageEntry[] | undefined>();
   const slugFixed = flow.published_version !== null;
+
+  useEffect(() => {
+    if (flow.kind !== "subflow") return;
+    let cancelled = false;
+    adminFetch<{ data: SubflowUsageEntry[] }>(`flows/${flow.id}/usage`)
+      .then((result) => {
+        if (!cancelled) setUsage(result.data);
+      })
+      .catch(() => {
+        if (!cancelled) setUsage([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [flow.id, flow.kind]);
 
   async function save() {
     setSaving(true);
@@ -168,6 +184,35 @@ export function SettingsPanel({ flow, routes, mediaTags, cameras, onSaved }: Set
           see these cameras.
         </p>
       </div>
+      {flow.kind === "subflow" && (
+        <div className="space-y-2 rounded-md border p-3" data-testid="subflow-usage">
+          <Label>Used by</Label>
+          {usage === undefined ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : usage.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No published agent or subflow calls this subflow yet.
+            </p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {usage.map((entry) => (
+                <li key={`${entry.flow_id}-${entry.version}`} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
+                  <span className="text-muted-foreground">
+                    {entry.kind} v{entry.version}
+                  </span>
+                  <span className="font-mono text-muted-foreground">
+                    pins {entry.pinned_version === null ? "—" : `v${entry.pinned_version}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Deleting is blocked while a published flow calls this subflow.
+          </p>
+        </div>
+      )}
       <Button onClick={save} disabled={saving}>
         {saving ? "Saving…" : "Save settings"}
       </Button>

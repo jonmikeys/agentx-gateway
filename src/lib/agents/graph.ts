@@ -18,6 +18,9 @@ export const NODE_TYPES = [
   "client_action",
   "reply",
   "end",
+  "subflow_input",
+  "subflow_output",
+  "call_subflow",
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
@@ -183,6 +186,57 @@ export const replyNodeDataSchema = z.object({
 export const startNodeDataSchema = z.object({ ...common });
 export const endNodeDataSchema = z.object({ ...common });
 
+export const SUBFLOW_PARAM_TYPES = ["string", "number", "boolean", "json"] as const;
+export type SubflowParamType = (typeof SUBFLOW_PARAM_TYPES)[number];
+
+/** One declared subflow input parameter. */
+export const subflowParamSchema = z.object({
+  name: variableNameSchema,
+  type: z.enum(SUBFLOW_PARAM_TYPES).default("string"),
+  required: z.boolean().default(true),
+});
+
+export const subflowInputNodeDataSchema = z.object({
+  ...common,
+  params: z.array(subflowParamSchema).max(50).default([]),
+});
+
+/** One declared return value of a subflow output; `value` is rendered as a template. */
+export const subflowReturnSchema = z.object({
+  name: variableNameSchema,
+  value: templateString(20_000),
+});
+
+export const subflowOutputNodeDataSchema = z.object({
+  ...common,
+  /** The branch label the caller sees; unique per subflow. */
+  label: z.string().trim().min(1, "Label is required").max(60).default("result"),
+  values: z.array(subflowReturnSchema).max(20).default([]),
+});
+
+/** Mapping of one declared subflow parameter to a caller template. */
+export const subflowInputMappingSchema = z.object({
+  name: variableNameSchema,
+  value: templateString(4000).default(""),
+});
+
+/** Where one subflow output label's return value lands in the caller's vars. */
+export const subflowOutputMappingSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  variable: variableNameSchema,
+});
+
+export const callSubflowNodeDataSchema = z.object({
+  ...common,
+  /** Target flow id (`agt_…`); must be a published subflow at publish time. */
+  subflowId: z.string().trim().max(80).nullable().default(null),
+  /** Display name captured by the editor for the card; refreshed when the target changes. */
+  subflowName: z.string().trim().max(120).optional(),
+  inputs: z.array(subflowInputMappingSchema).max(50).default([]),
+  /** One output handle per entry (`out:<label>`); the handle carries the branch. */
+  outputs: z.array(subflowOutputMappingSchema).max(20).default([]),
+});
+
 const nodeBase = {
   id: z.string().trim().min(1).max(80),
   position: positionSchema,
@@ -199,6 +253,9 @@ export const flowNodeSchema = z.discriminatedUnion("type", [
   z.object({ ...nodeBase, type: z.literal("client_action"), data: clientActionNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("reply"), data: replyNodeDataSchema }),
   z.object({ ...nodeBase, type: z.literal("end"), data: endNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("subflow_input"), data: subflowInputNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("subflow_output"), data: subflowOutputNodeDataSchema }),
+  z.object({ ...nodeBase, type: z.literal("call_subflow"), data: callSubflowNodeDataSchema }),
 ]);
 
 export const flowEdgeSchema = z.looseObject({
@@ -229,6 +286,10 @@ export type MemoryNodeData = z.infer<typeof memoryNodeDataSchema>;
 export type McpToolNodeData = z.infer<typeof mcpToolNodeDataSchema>;
 export type ClientActionNodeData = z.infer<typeof clientActionNodeDataSchema>;
 export type ReplyNodeData = z.infer<typeof replyNodeDataSchema>;
+export type SubflowInputNodeData = z.infer<typeof subflowInputNodeDataSchema>;
+export type SubflowOutputNodeData = z.infer<typeof subflowOutputNodeDataSchema>;
+export type CallSubflowNodeData = z.infer<typeof callSubflowNodeDataSchema>;
+export type SubflowParam = z.infer<typeof subflowParamSchema>;
 
 /** Node types whose execution can fail and that therefore expose an `error` output handle. */
 export function isFallibleNode(type: NodeType): boolean {
@@ -237,7 +298,8 @@ export function isFallibleNode(type: NodeType): boolean {
     type === "router" ||
     type === "webhook" ||
     type === "mcp_tool" ||
-    type === "client_action"
+    type === "client_action" ||
+    type === "call_subflow"
   );
 }
 
@@ -274,6 +336,20 @@ export function nodeHandles(node: FlowNode): NodeHandle[] {
           : []),
       ];
     }
+    case "call_subflow": {
+      return [
+        ...node.data.outputs.map((output) => ({
+          id: `out:${output.label}`,
+          label: output.label,
+          kind: "out" as const,
+        })),
+        ...(isFallibleNode("call_subflow")
+          ? [{ id: "error", label: "error", kind: "error" as const }]
+          : []),
+      ];
+    }
+    case "subflow_output":
+      return [];
     case "end":
       return [];
     default:
@@ -297,6 +373,8 @@ export interface NodeCatalogEntry {
   group: "Flow" | "AI" | "Actions" | "Data";
   description: string;
   defaultData: () => FlowNodeData;
+  /** Flow kinds that offer the node in the palette; omitted means both. */
+  kinds?: readonly FlowKind[];
 }
 
 /** Palette entries and the default data used when a node is added. */
@@ -307,6 +385,7 @@ export const nodeCatalog: NodeCatalogEntry[] = [
     group: "Flow",
     description: "Entry point; exposes the user message, history and session id.",
     defaultData: () => ({ title: "Start" }),
+    kinds: ["agent"],
   },
   {
     type: "reply",
@@ -321,6 +400,23 @@ export const nodeCatalog: NodeCatalogEntry[] = [
     group: "Flow",
     description: "Ends the turn.",
     defaultData: () => ({ title: "End" }),
+    kinds: ["agent"],
+  },
+  {
+    type: "subflow_input",
+    label: "Subflow Input",
+    group: "Flow",
+    description: "Declares the typed parameters a caller must pass in. Exactly one per subflow.",
+    defaultData: () => ({ title: "Input", params: [] }),
+    kinds: ["subflow"],
+  },
+  {
+    type: "subflow_output",
+    label: "Subflow Output",
+    group: "Flow",
+    description: "Declares return values and a branch label. Add one per caller branch.",
+    defaultData: () => ({ title: "Output", label: "result", values: [] }),
+    kinds: ["subflow"],
   },
   {
     type: "llm",
@@ -408,6 +504,18 @@ export const nodeCatalog: NodeCatalogEntry[] = [
     }),
   },
   {
+    type: "call_subflow",
+    label: "Call Subflow",
+    group: "Actions",
+    description: "Runs a published subflow with mapped inputs; each output label is a branch.",
+    defaultData: () => ({
+      title: "Call subflow",
+      subflowId: null,
+      inputs: [],
+      outputs: [],
+    }),
+  },
+  {
     type: "set_variable",
     label: "Set Variable",
     group: "Data",
@@ -459,7 +567,15 @@ export function createFlowNode(
 export const EMPTY_GRAPH: FlowGraph = { nodes: [], edges: [] };
 
 /** A freshly created agent starts with a valid skeleton: Start -> Reply -> End. */
-export function starterGraph(): FlowGraph {
+export function starterGraph(kind: FlowKind = "agent"): FlowGraph {
+  if (kind === "subflow") {
+    const input = createFlowNode("subflow_input", { x: 0, y: 0 });
+    const output = createFlowNode("subflow_output", { x: 320, y: 0 });
+    return {
+      nodes: [input, output],
+      edges: [{ id: "e_input_output", source: input.id, target: output.id, sourceHandle: "out" }],
+    };
+  }
   const start = createFlowNode("start", { x: 0, y: 0 });
   const reply = createFlowNode("reply", { x: 260, y: 0 });
   const end = createFlowNode("end", { x: 520, y: 0 });
@@ -470,6 +586,11 @@ export function starterGraph(): FlowGraph {
       { id: "e_reply_end", source: reply.id, target: end.id, sourceHandle: "out" },
     ],
   };
+}
+
+/** Edge handle id used for one Call Subflow output branch. */
+export function subflowOutputHandle(label: string): string {
+  return `out:${label}`;
 }
 
 /** `1 label`, `2 labels` for compact UI counts. */
@@ -506,10 +627,23 @@ export function summarizeNode(node: FlowNode): string {
       return node.data.template.replace(/\{\{[^}]*\}\}/g, "…").slice(0, 80) || "Empty reply";
     case "end":
       return "Ends the turn";
+    case "subflow_input":
+      return node.data.params.length === 0
+        ? "No parameters"
+        : plural(node.data.params.length, "parameter");
+    case "subflow_output":
+      return `${node.data.label} · ${plural(node.data.values.length, "value")}`;
+    case "call_subflow":
+      return node.data.subflowName ?? node.data.subflowId ?? "No subflow selected";
   }
 }
 
 /** Handles that lead to another node, used by the canvas to place connection anchors. */
 export function isTerminalType(type: NodeType): boolean {
-  return type === "end";
+  return type === "end" || type === "subflow_output";
+}
+
+/** Palette entries offered for a flow kind. */
+export function nodeCatalogFor(kind: FlowKind): NodeCatalogEntry[] {
+  return nodeCatalog.filter((entry) => !entry.kinds || entry.kinds.includes(kind));
 }

@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CLIENT_ACTION_TOOLS } from "@/lib/agents/client-tools";
 import type {
+  CallSubflowNodeData,
   ClientActionNodeData,
   LlmNodeData,
   McpToolNodeData,
@@ -27,9 +28,12 @@ import type {
   ReplyNodeData,
   RouterNodeData,
   SetVariableNodeData,
+  SubflowInputNodeData,
+  SubflowOutputNodeData,
   WebhookNodeData,
 } from "@/lib/agents/graph";
 import type { VariableSuggestion } from "@/lib/agents/templates";
+import type { SubflowOption } from "@/lib/agents/types";
 
 export interface McpOption {
   id: string;
@@ -63,6 +67,7 @@ interface PropertiesPanelProps {
   cameras: CameraOption[];
   allowedMediaTags: string[];
   allowedCameraIds: string[];
+  subflows: SubflowOption[];
   variables: VariableSuggestion[];
   knownNodeIds: string[];
   onChange: (data: EditorNodeData) => void;
@@ -163,6 +168,7 @@ export function PropertiesPanel({
   cameras,
   allowedMediaTags,
   allowedCameraIds,
+  subflows,
   variables,
   knownNodeIds,
   onChange,
@@ -1109,6 +1115,307 @@ export function PropertiesPanel({
           variables={variables}
           knownNodeIds={knownNodeIds}
         />
+      </div>
+    );
+  }
+
+  if (nodeType === "subflow_input") {
+    const input = data as SubflowInputNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Parameters</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Add parameter"
+            onClick={() =>
+              update({
+                params: [...input.params, { name: "param", type: "string", required: true }],
+              })
+            }
+          >
+            <Plus />
+            Add
+          </Button>
+        </div>
+        {input.params.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Callers must pass every required parameter. Arrays of values are not supported in v1.
+          </p>
+        ) : (
+          input.params.map((param, index) => (
+            <div key={param.name} className="space-y-2 rounded-md border p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`Parameter ${index + 1} name`}
+                  className="font-mono text-xs"
+                  value={param.name}
+                  onChange={(event) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, name: event.target.value } : entry,
+                      ),
+                    })
+                  }
+                />
+                <Select
+                  value={param.type}
+                  onValueChange={(value) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, type: value } : entry,
+                      ),
+                    })
+                  }
+                >
+                  <SelectTrigger aria-label={`Parameter ${index + 1} type`} className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="string">string</SelectItem>
+                    <SelectItem value="number">number</SelectItem>
+                    <SelectItem value="boolean">boolean</SelectItem>
+                    <SelectItem value="json">json</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove parameter ${index + 1}`}
+                  onClick={() =>
+                    update({ params: input.params.filter((_, position) => position !== index) })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <Label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={param.required}
+                  onCheckedChange={(checked) =>
+                    update({
+                      params: input.params.map((entry, position) =>
+                        position === index ? { ...entry, required: checked === true } : entry,
+                      ),
+                    })
+                  }
+                />
+                Required
+              </Label>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  if (nodeType === "subflow_output") {
+    const output = data as SubflowOutputNodeData;
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Branch label" id={fieldId("subflowLabel")}>
+          <Input
+            id={fieldId("subflowLabel")}
+            value={output.label}
+            onChange={(event) => update({ label: event.target.value })}
+          />
+        </Field>
+        <p className="text-xs text-muted-foreground">
+          Each output label becomes a separate output handle on the Call Subflow node.
+        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">Return values</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Add return value"
+            onClick={() => update({ values: [...output.values, { name: "value", value: "" }] })}
+          >
+            <Plus />
+            Add
+          </Button>
+        </div>
+        {output.values.map((entry, index) => (
+          <div key={entry.name} className="space-y-2 rounded-md border p-2">
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={`Return value ${index + 1} name`}
+                className="font-mono text-xs"
+                value={entry.name}
+                onChange={(event) =>
+                  update({
+                    values: output.values.map((item, position) =>
+                      position === index ? { ...item, name: event.target.value } : item,
+                    ),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove return value ${index + 1}`}
+                onClick={() =>
+                  update({ values: output.values.filter((_, position) => position !== index) })
+                }
+              >
+                <Trash2 />
+              </Button>
+            </div>
+            <TemplateField
+              placeholder={`Return value for ${entry.name}`}
+              value={entry.value}
+              onChange={(value) =>
+                update({
+                  values: output.values.map((item, position) =>
+                    position === index ? { ...item, value } : item,
+                  ),
+                })
+              }
+              variables={variables}
+              knownNodeIds={knownNodeIds}
+              rows={2}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (nodeType === "call_subflow") {
+    const call = data as CallSubflowNodeData;
+    const target = subflows.find((entry) => entry.id === call.subflowId);
+
+    const chooseTarget = (value: string) => {
+      const next = subflows.find((entry) => entry.id === value);
+      if (!next) {
+        update({ subflowId: null, subflowName: undefined, inputs: [], outputs: [] });
+        return;
+      }
+      const existingInputs = new Map(call.inputs.map((entry) => [entry.name, entry.value]));
+      const existingOutputs = new Map(call.outputs.map((entry) => [entry.label, entry.variable]));
+      update({
+        subflowId: next.id,
+        subflowName: next.name,
+        inputs: next.params.map((param) => ({
+          name: param.name,
+          value: existingInputs.get(param.name) ?? "",
+        })),
+        outputs: next.outputs.map((label) => ({
+          label,
+          variable:
+            existingOutputs.get(label) ??
+            `subflow_${label.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([^A-Za-z_])/, "x$1")}`,
+        })),
+      });
+    };
+
+    const syncOutputs = () => {
+      if (!target) return;
+      const existingOutputs = new Map(call.outputs.map((entry) => [entry.label, entry.variable]));
+      update({
+        outputs: target.outputs.map((label) => ({
+          label,
+          variable:
+            existingOutputs.get(label) ??
+            `subflow_${label.replace(/[^A-Za-z0-9_]/g, "_").replace(/^([^A-Za-z_])/, "x$1")}`,
+        })),
+      });
+    };
+
+    return (
+      <div className="space-y-4 p-4">
+        {common}
+        <Field label="Subflow" id={fieldId("subflow")}>
+          <Select value={call.subflowId ?? "none"} onValueChange={chooseTarget}>
+            <SelectTrigger id={fieldId("subflow")} className="w-full">
+              <SelectValue placeholder="Choose a published subflow" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Choose a subflow</SelectItem>
+              {subflows.map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {entry.name} (v{entry.version})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {call.subflowId && !target && (
+          <p className="text-xs text-destructive">
+            This subflow is not published (or was deleted). Publish it and pick it again.
+          </p>
+        )}
+        {target && (
+          <>
+            <div className="space-y-2">
+              <span className="text-xs font-medium">Inputs</span>
+              {target.params.length === 0 ? (
+                <p className="text-xs text-muted-foreground">This subflow takes no inputs.</p>
+              ) : (
+                target.params.map((param) => (
+                  <div key={param.name} className="space-y-1">
+                    <Label className="text-xs">
+                      <span className="font-mono">{param.name}</span>
+                      <span className="text-muted-foreground"> · {param.type}</span>
+                      {param.required && <span className="text-destructive"> *</span>}
+                    </Label>
+                    <TemplateField
+                      placeholder={`Value for ${param.name}`}
+                      value={call.inputs.find((entry) => entry.name === param.name)?.value ?? ""}
+                      onChange={(value) => {
+                        const others = call.inputs.filter((entry) => entry.name !== param.name);
+                        update({ inputs: [...others, { name: param.name, value }] });
+                      }}
+                      variables={variables}
+                      knownNodeIds={knownNodeIds}
+                      multiline={false}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">Outputs</span>
+                <Button type="button" variant="outline" size="xs" onClick={syncOutputs}>
+                  Sync outputs
+                </Button>
+              </div>
+              {call.outputs.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Sync to create one branch handle per output label.
+                </p>
+              ) : (
+                call.outputs.map((output, index) => (
+                  <div key={output.label} className="flex items-center gap-2">
+                    <span className="w-24 truncate text-xs" title={output.label}>
+                      {output.label}
+                    </span>
+                    <Input
+                      aria-label={`Output ${output.label} variable`}
+                      className="font-mono text-xs"
+                      value={output.variable}
+                      onChange={(event) =>
+                        update({
+                          outputs: call.outputs.map((entry, position) =>
+                            position === index ? { ...entry, variable: event.target.value } : entry,
+                          ),
+                        })
+                      }
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
     );
   }

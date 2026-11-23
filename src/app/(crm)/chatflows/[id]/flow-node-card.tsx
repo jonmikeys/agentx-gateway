@@ -32,11 +32,15 @@ const icons: Record<NodeType, LucideIcon> = {
   client_action: MonitorPlay,
   reply: MessageSquare,
   end: Square,
+  subflow_input: Play,
+  subflow_output: Square,
+  call_subflow: GitBranch,
 };
 
 /** Custom React Flow card: icon, editable title, summary, dynamic Router handles, error handles. */
 export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>) {
-  const { problems, runningNodeId, traceNodeId, onRename } = useEditorUi();
+  const { problems, runningNodeId, traceNodeId, nodeBadges, onRename } = useEditorUi();
+  const badge = nodeBadges?.get(id);
   const Icon = icons[(type ?? "start") as NodeType];
   const node = { id, type, position: { x: 0, y: 0 }, data } as FlowNode;
   const handles = nodeHandles(node);
@@ -58,7 +62,7 @@ export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>
         nodeProblems.length > 0 && "border-destructive/60",
       )}
     >
-      {type !== "start" && (
+      {type !== "start" && type !== "subflow_input" && (
         <Handle
           type="target"
           position={Position.Left}
@@ -100,6 +104,15 @@ export function FlowNodeCard({ id, type, data, selected }: NodeProps<EditorNode>
           <span role="img" title={data.comment} aria-label="Node has a comment">
             <MessageSquare className="size-3.5 text-muted-foreground" />
           </span>
+        )}
+        {badge && (
+          <Badge
+            variant="secondary"
+            className="whitespace-nowrap text-[10px]"
+            data-testid="node-badge"
+          >
+            {badge}
+          </Badge>
         )}
         {running && (
           <span className="ml-auto text-[10px] font-medium text-primary" data-testid="node-running">

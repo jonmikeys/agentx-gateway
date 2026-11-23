@@ -1,6 +1,6 @@
 ﻿import { notFound } from "next/navigation";
 import { ChatflowEditor } from "@/app/(crm)/chatflows/[id]/chatflow-editor";
-import { getFlow } from "@/server/services/agents";
+import { getFlow, listPublishedSubflows } from "@/server/services/agents";
 import { listCameras } from "@/server/services/cameras";
 import { listAllowedMcpTools, listMcpServers } from "@/server/services/mcp";
 import { listMedia, listMediaTags } from "@/server/services/media";
@@ -16,13 +16,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   } catch {
     notFound();
   }
-  const [routes, servers, tools, media, mediaTags, cameras] = await Promise.all([
+  const [routes, servers, tools, media, mediaTags, cameras, subflows] = await Promise.all([
     listRoutes(),
     listMcpServers(),
     listAllowedMcpTools(),
     listMedia({ enabled: true }),
     listMediaTags(),
     listCameras(),
+    listPublishedSubflows(),
   ]);
   return (
     <ChatflowEditor
@@ -53,6 +54,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         name: camera.name,
         enabled: camera.enabled,
       }))}
+      subflows={subflows}
     />
   );
 }

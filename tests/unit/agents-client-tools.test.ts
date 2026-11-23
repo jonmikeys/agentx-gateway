@@ -368,9 +368,13 @@ describe("Client Action executor", () => {
         mcpCall: async () => ({ text: "ok", isError: false }),
         webhookHeaders: async () => ({}),
         memory: createInMemoryMemoryStore(),
+        loadSubflowVersion: async () => undefined,
       },
       emitText: () => {},
       signal: new AbortController().signal,
+      threadId: "44444444-4444-4444-8444-444444444444",
+      pinnedSubflows: {},
+      depth: 0,
     };
   }
 

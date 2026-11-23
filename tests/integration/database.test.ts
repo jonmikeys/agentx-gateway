@@ -80,6 +80,9 @@ describe("database migrations", () => {
   it("rotates the real provider columns via the registry", async () => {
     const oldKey = generateEncryptionKey();
     const newKey = generateEncryptionKey();
+    // Other test files may have left provider rows encrypted with their own keys; rotate every
+    // row, so start from an empty table to keep this check independent of file order.
+    await sql`truncate table providers cascade`;
     await sql`insert into providers (name, base_url, api_key, extra_headers) values
       ('RotateP1', 'http://a', ${encryptSecretWithKey("key-one", oldKey)}, ${encryptSecretWithKey('{"X":"1"}', oldKey)}),
       ('RotateP2', 'http://b', null, null)`;

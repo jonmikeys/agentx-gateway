@@ -238,13 +238,17 @@ results **resumes** the run. Paused runs are discarded on session expiry.
 
 ### Per-agent restrictions
 Allowed media tags and allowed cameras filter the enums offered to the model and the
-Client Action pickers.
+Client Action pickers, and are enforced at run time against Client Actions inside called
+subflows (the subflow has no way to know its caller at publish time, so the calling agent's
+resolved sets are applied while it runs).
 
 ### Subflows
 Reusable flows with declared inputs/outputs, compiled as nested subgraphs: own `vars`,
-shared session `memory`, Replies stream to the client, interrupts work inside. Parents
-pin the subflow version at publish ("update available" badge). Usage view; cannot delete
-while referenced.
+shared session `memory`, Replies stream to the client. A client-tool pause inside a subflow
+pauses the whole run (the parent pauses on its Call Subflow node) and resuming continues in
+the subflow's own checkpoint before its output returns to the parent. Parents pin the
+subflow version at publish ("update available" badge). Usage view; cannot delete while
+referenced.
 
 ### Run logs
 Every production run stores a per-node trace (inputs, outputs, timing, errors), linked

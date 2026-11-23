@@ -309,6 +309,34 @@ export function TestDrawer({
                             </span>
                           )}
                         </button>
+                        {step.substeps && step.substeps.length > 0 && (
+                          <ol className="ml-3 border-l">
+                            {step.substeps.map((substep) => (
+                              <li
+                                key={`${substep.node_id}-${substep.started_at}`}
+                                className="flex flex-wrap items-center gap-2 border-b px-2 py-1 pl-4 text-[11px] text-muted-foreground"
+                              >
+                                <span
+                                  className={cn(
+                                    "size-1.5 rounded-full",
+                                    substep.status === "ok" ? "bg-primary" : "bg-destructive",
+                                  )}
+                                />
+                                <span className="font-medium">{substep.title}</span>
+                                <span className="font-mono">{substep.node_type}</span>
+                                <span className="ml-auto flex items-center gap-1">
+                                  <Timer className="size-3" />
+                                  {formatDuration(substep.duration_ms)}
+                                </span>
+                                {substep.error && (
+                                  <span className="w-full break-words text-destructive">
+                                    {substep.error}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                       </li>
                     ))}
                   </ol>
