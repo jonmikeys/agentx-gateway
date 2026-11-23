@@ -244,7 +244,11 @@ async function seedAgent(admin: APIRequestContext) {
     id: "start_layout",
     type: "start",
     position: { x: 0, y: 0 },
-    data: { title: "Start of the layout QA agent" },
+    data: {
+      title: "Start of the layout QA agent",
+      comment: `A node comment that is long enough to wrap inside the popover ${"y".repeat(40)}`,
+      commentUpdatedAt: "2026-01-01T00:00:00.000Z",
+    },
   };
   const llm = {
     id: "llm_layout",

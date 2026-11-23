@@ -8,6 +8,7 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import {
   applyEdgeChanges,
@@ -18,14 +19,23 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   ArrowLeft,
+  BringToFront,
+  Download,
+  Eye,
+  EyeOff,
   GitBranch,
+  Group as GroupIcon,
   History,
   LayoutGrid,
+  Maximize,
   Redo2,
   Save,
+  SendToBack,
   Settings2,
   SlidersHorizontal,
+  StickyNote,
   Undo2,
+  Ungroup,
   Upload,
   Variable,
 } from "lucide-react";
@@ -35,6 +45,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EditorUi } from "@/app/(crm)/chatflows/[id]/editor-context";
 import {
+  adjustLayer,
+  canvasNodeId,
+  collapsedGroupIds,
+  groupNodes,
+  isCanvasNodeType,
+  selectedIds,
+  ungroupNode,
+} from "@/app/(crm)/chatflows/[id]/flow-canvas-ops";
+import {
   autoLayout,
   type EditorEdge,
   type EditorNode,
@@ -43,6 +62,8 @@ import {
   toFlowGraph,
 } from "@/app/(crm)/chatflows/[id]/flow-editor-utils";
 import { FlowNodeCard } from "@/app/(crm)/chatflows/[id]/flow-node-card";
+import { GroupNode } from "@/app/(crm)/chatflows/[id]/group-node";
+import { NoteNode } from "@/app/(crm)/chatflows/[id]/note-node";
 import { type McpOption, PropertiesPanel } from "@/app/(crm)/chatflows/[id]/properties-panel";
 import { PublishDialog } from "@/app/(crm)/chatflows/[id]/publish-dialog";
 import { SettingsPanel } from "@/app/(crm)/chatflows/[id]/settings-panel";
@@ -52,13 +73,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
+import type { GraphDiff } from "@/lib/agents/diff";
 import {
   createFlowNode,
+  type FlowGraph,
   type FlowNode,
+  type GroupNodeData,
   type NodeType,
   nodeCatalogFor,
   nodeHandles,
 } from "@/lib/agents/graph";
+import { convertGroupToSubflow } from "@/lib/agents/group-to-subflow";
+import { buildExportPayload, downloadJson } from "@/lib/agents/io";
 import { variableSuggestions } from "@/lib/agents/templates";
 import type { FlowDetail, SubflowOption } from "@/lib/agents/types";
 import { problemsByNode, validateGraph } from "@/lib/agents/validate";
@@ -78,6 +104,8 @@ const nodeTypes = {
   subflow_input: FlowNodeCard,
   subflow_output: FlowNodeCard,
   call_subflow: FlowNodeCard,
+  note: NoteNode,
+  group: GroupNode,
 };
 
 const nodeIcon = (type: NodeType) => {
@@ -87,6 +115,10 @@ const nodeIcon = (type: NodeType) => {
     case "set_variable":
     case "memory":
       return Variable;
+    case "note":
+      return StickyNote;
+    case "group":
+      return GroupIcon;
     default:
       return SlidersHorizontal;
   }
@@ -146,7 +178,11 @@ export function ChatflowEditor({
   const [mobilePanel, setMobilePanel] = useState<"palette" | "properties" | undefined>();
   const [saveState, setSaveState] = useState<"saved" | "unsaved" | "saving" | "error">("saved");
   const [savedAt, setSavedAt] = useState(initialFlow.draft_updated_at);
+  const [hideAnnotations, setHideAnnotations] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | undefined>();
+  const [diff, setDiff] = useState<GraphDiff | undefined>();
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const flowInstance = useRef<ReactFlowInstance<EditorNode, EditorEdge> | null>(null);
   const past = useRef<{ nodes: EditorNode[]; edges: EditorEdge[] }[]>([]);
   const future = useRef<{ nodes: EditorNode[]; edges: EditorEdge[] }[]>([]);
   const clipboard = useRef<{ nodes: EditorNode[]; edges: EditorEdge[] } | null>(null);
@@ -155,7 +191,7 @@ export function ChatflowEditor({
 
   const graph = useMemo(() => toFlowGraph(nodes, edges), [nodes, edges]);
   const graphJson = useMemo(() => JSON.stringify(graph), [graph]);
-  const validation = useMemo(() => validateGraph(graph), [graph]);
+  const validation = useMemo(() => validateGraph(graph, { kind: flow.kind }), [graph, flow.kind]);
   const problems = useMemo(() => problemsByNode(validation), [validation]);
   const knownNodeIds = useMemo(() => nodes.map((node) => node.id), [nodes]);
   const variables = useMemo(
@@ -167,6 +203,43 @@ export function ChatflowEditor({
     [nodes],
   );
   const selected = nodes.find((node) => node.selected);
+  const selectedNodeIds = useMemo(() => selectedIds(nodes), [nodes]);
+  const selectedGroup = nodes.find((node) => node.selected && node.type === "group");
+  const selectedNote = selected?.type === "note";
+  const groupChildCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of nodes) {
+      if (!node.parentId) continue;
+      counts.set(node.parentId, (counts.get(node.parentId) ?? 0) + 1);
+    }
+    return counts;
+  }, [nodes]);
+
+  const displayNodes = useMemo(() => {
+    const collapsed = collapsedGroupIds(nodes);
+    if (!hideAnnotations && collapsed.size === 0) return nodes;
+    return nodes.map((node) => {
+      if (node.type === "note" && hideAnnotations) return { ...node, hidden: true };
+      if (node.parentId && collapsed.has(node.parentId))
+        return { ...node, hidden: true, selected: false };
+      return node;
+    });
+  }, [nodes, hideAnnotations]);
+
+  const displayEdges = useMemo(() => {
+    if (!diff || diff.edges.size === 0) return edges;
+    return edges.map((edge) => {
+      const status = diff.edges.get(edge.id);
+      if (!status) return edge;
+      return {
+        ...edge,
+        style: {
+          stroke: status === "changed" ? "var(--chart-2)" : "var(--chart-5)",
+          strokeWidth: 2.5,
+        },
+      };
+    });
+  }, [edges, diff]);
 
   // "Update available" for Call Subflow nodes whose target gained a published version since the
   // version this flow currently pins.
@@ -214,16 +287,47 @@ export function ChatflowEditor({
     );
   }
 
+  function updateNodeDataById(nodeId: string, patch: Record<string, unknown>) {
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node,
+      ),
+    );
+  }
+
+  function toggleGroupCollapse(groupId: string) {
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.id !== groupId || node.type !== "group") return node;
+        const data = node.data as GroupNodeData;
+        return { ...node, data: { ...data, collapsed: !data.collapsed } };
+      }),
+    );
+  }
+
   function addNode(type: NodeType) {
     const anchor = selected;
+    const canvasNode = isCanvasNodeType(type);
     const position = anchor
       ? { x: anchor.position.x + 320, y: anchor.position.y }
       : { x: 80 + (nodes.length % 3) * 60, y: 80 + (nodes.length % 3) * 60 };
     const created = createFlowNode(type, position) as FlowNode;
     const editorNode = toEditorNodes({ nodes: [created], edges: [] })[0];
+    if (type === "note") {
+      editorNode.width = 240;
+      editorNode.height = 160;
+      editorNode.zIndex = 1;
+    }
     pushHistory();
     let nextEdges = edges;
-    if (anchor && anchor.type !== "end" && anchor.type !== "subflow_output" && type !== "start") {
+    if (
+      !canvasNode &&
+      anchor &&
+      !isCanvasNodeType(anchor.type) &&
+      anchor.type !== "end" &&
+      anchor.type !== "subflow_output" &&
+      type !== "start"
+    ) {
       const anchorFlow = {
         id: anchor.id,
         type: anchor.type,
@@ -279,6 +383,107 @@ export function ChatflowEditor({
     setNodes((current) => autoLayout(current, edges));
   }
 
+  function groupSelection() {
+    if (selectedNodeIds.size === 0) return;
+    pushHistory();
+    setNodes((current) => groupNodes(current, selectedNodeIds, canvasNodeId("group")));
+  }
+
+  function ungroupSelection() {
+    if (!selectedGroup) return;
+    pushHistory();
+    setNodes((current) => ungroupNode(current, selectedGroup.id));
+  }
+
+  function fitCanvas() {
+    void flowInstance.current?.fitView({ padding: 0.2, duration: 200 });
+  }
+
+  /**
+   * Extracts the group's children into a new subflow draft and replaces the group with a Call
+   * Subflow node wired to the same neighbours. Both graphs are validated before anything is saved.
+   */
+  async function convertGroup(groupId: string) {
+    const result = convertGroupToSubflow(graph, groupId);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    const { subflow, parent, subflowName, callNodeId } = result.conversion;
+    const subflowCheck = validateGraph(subflow, { kind: "subflow" });
+    if (!subflowCheck.valid) {
+      toast.error(
+        `Cannot convert: ${subflowCheck.problems[0]?.message ?? "the subflow would be invalid"}`,
+      );
+      return;
+    }
+    const parentCheck = validateGraph(parent, { kind: flow.kind });
+    if (!parentCheck.valid) {
+      toast.error(
+        `Cannot convert: ${parentCheck.problems[0]?.message ?? "the flow would be invalid"}`,
+      );
+      return;
+    }
+    // Open the tab while we still hold the click gesture so popup blockers allow it.
+    const tab = typeof window === "undefined" ? null : window.open("", "_blank");
+    try {
+      const suffix = Math.random().toString(36).slice(2, 6);
+      const slug = `${
+        subflowName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48) || "subflow"
+      }-${suffix}`;
+      const created = await adminFetch<FlowDetail>("flows", {
+        method: "POST",
+        body: {
+          name: subflowName,
+          slug,
+          kind: "subflow",
+          description: `Extracted from ${flow.name}`,
+        },
+      });
+      await adminFetch(`flows/${created.id}/draft`, { method: "PUT", body: { graph: subflow } });
+      const linked = {
+        ...parent,
+        nodes: parent.nodes.map((node) =>
+          node.id === callNodeId && node.type === "call_subflow"
+            ? {
+                ...node,
+                data: { ...node.data, subflowId: created.id, subflowName: created.name },
+              }
+            : node,
+        ),
+      } as FlowGraph;
+      pushHistory();
+      setNodes(toEditorNodes(linked));
+      setEdges(toEditorEdges(linked));
+      toast.success(`Created subflow ${created.name}`);
+      if (tab) tab.location.href = `/chatflows/${created.id}`;
+      else router.push(`/chatflows/${created.id}`);
+    } catch (error) {
+      tab?.close();
+      toast.error(errorMessage(error));
+    }
+  }
+
+  function exportDraft() {
+    const payload = buildExportPayload(
+      {
+        name: flow.name,
+        slug: flow.slug,
+        kind: flow.kind,
+        description: flow.description,
+        settings: flow.settings,
+        version: flow.published_version,
+      },
+      graph,
+    );
+    downloadJson(`${flow.slug || "chatflow"}-draft.json`, payload);
+    toast.success("Draft exported as JSON");
+  }
+
   function copySelection() {
     const selectedNodes = nodes.filter((node) => node.selected);
     if (selectedNodes.length === 0) return;
@@ -297,11 +502,15 @@ export function ChatflowEditor({
     const clones = content.nodes.map((node, index) => {
       const id = `${node.type}_${stamp}_${index}`;
       mapping.set(node.id, id);
+      const parentId = node.parentId ? mapping.get(node.parentId) : undefined;
       return {
         ...node,
         id,
+        parentId,
         selected: true,
-        position: { x: node.position.x + 48, y: node.position.y + 48 },
+        position: node.parentId
+          ? node.position
+          : { x: node.position.x + 48, y: node.position.y + 48 },
       } as EditorNode;
     });
     const clonedEdges = content.edges.map((edge, index) => ({
@@ -340,6 +549,17 @@ export function ChatflowEditor({
       }
       if (modifier && key === "v") {
         pasteSelection();
+        return;
+      }
+      if (modifier && key === "g") {
+        event.preventDefault();
+        if (event.shiftKey) ungroupSelection();
+        else groupSelection();
+        return;
+      }
+      if (!modifier && !event.shiftKey && key === "n") {
+        event.preventDefault();
+        addNode("note");
         return;
       }
       if (
@@ -388,8 +608,18 @@ export function ChatflowEditor({
     return () => clearTimeout(timer);
   }, [graphJson, graph, flow.id]);
 
+  // Refit the visible canvas when the drawer changes its height; minZoom keeps cards readable.
+  useEffect(() => {
+    void drawerOpen;
+    const timer = setTimeout(() => {
+      void flowInstance.current?.fitView({ padding: 0.2, duration: 200 });
+    }, 240);
+    return () => clearTimeout(timer);
+  }, [drawerOpen]);
+
   function applyRestored(next: FlowDetail) {
     setFlow(next);
+    setDiff(undefined);
     setNodes(toEditorNodes(next.draft));
     setEdges(toEditorEdges(next.draft));
     savedJson.current = JSON.stringify(
@@ -402,7 +632,7 @@ export function ChatflowEditor({
 
   const palette = (
     <div className="space-y-3">
-      {(["Flow", "AI", "Actions", "Data"] as const).map((group) => (
+      {(["Flow", "AI", "Actions", "Data", "Notes"] as const).map((group) => (
         <div key={group} className="space-y-1">
           <p className="px-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {group}
@@ -464,12 +694,20 @@ export function ChatflowEditor({
         runningNodeId,
         traceNodeId,
         nodeBadges,
+        hideAnnotations,
+        editingNoteId,
+        diff,
+        groupChildCount: (groupId) => groupChildCounts.get(groupId) ?? 0,
         onRename: (nodeId, title) =>
           setNodes((current) =>
             current.map((node) =>
               node.id === nodeId ? { ...node, data: { ...node.data, title } } : node,
             ),
           ),
+        onUpdateNodeData: updateNodeDataById,
+        onToggleCollapse: toggleGroupCollapse,
+        onEditNote: setEditingNoteId,
+        onConvertGroup: convertGroup,
       }}
     >
       <div className="flex h-[calc(100dvh-8.5rem)] min-h-[520px] min-w-0 flex-col gap-3">
@@ -507,6 +745,64 @@ export function ChatflowEditor({
             </Button>
             <Button variant="outline" size="icon-sm" aria-label="Auto-layout" onClick={runLayout}>
               <LayoutGrid />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Group selected nodes"
+              disabled={selectedNodeIds.size === 0}
+              onClick={groupSelection}
+            >
+              <GroupIcon />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Ungroup selected group"
+              disabled={!selectedGroup}
+              onClick={ungroupSelection}
+            >
+              <Ungroup />
+            </Button>
+            {selectedNote && (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label="Bring note forward"
+                  onClick={() => setNodes((current) => adjustLayer(current, selected.id, 1))}
+                >
+                  <BringToFront />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label="Send note backward"
+                  onClick={() => setNodes((current) => adjustLayer(current, selected.id, -1))}
+                >
+                  <SendToBack />
+                </Button>
+              </>
+            )}
+            <Button
+              variant={hideAnnotations ? "secondary" : "outline"}
+              size="icon-sm"
+              aria-label="Hide notes and comments"
+              aria-pressed={hideAnnotations}
+              onClick={() => setHideAnnotations((current) => !current)}
+            >
+              {hideAnnotations ? <EyeOff /> : <Eye />}
+            </Button>
+            <Button variant="outline" size="icon-sm" aria-label="Fit view" onClick={fitCanvas}>
+              <Maximize />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Export flow as JSON"
+              onClick={exportDraft}
+            >
+              <Download />
             </Button>
             <Button
               variant={view === "settings" ? "secondary" : "outline"}
@@ -557,21 +853,49 @@ export function ChatflowEditor({
                   Properties
                 </Button>
               </div>
+              {diff && !diff.empty && (
+                <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+                  <span className="font-medium">Comparing version with draft</span>
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-chart-5" /> Added
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-chart-2" /> Changed
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-destructive" /> Removed
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="ml-auto"
+                    onClick={() => setDiff(undefined)}
+                  >
+                    Clear highlight
+                  </Button>
+                </div>
+              )}
               <div
                 ref={canvasRef}
                 className="relative min-h-[320px] flex-1 overflow-hidden rounded-lg border"
               >
                 <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
+                  nodes={displayNodes}
+                  edges={displayEdges}
                   nodeTypes={nodeTypes}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
                   onConnect={onConnect}
                   onNodeDragStart={pushHistory}
+                  onNodeDoubleClick={(_event, node) => {
+                    if (node.type === "note") setEditingNoteId(node.id);
+                  }}
+                  onInit={(instance) => {
+                    flowInstance.current = instance;
+                  }}
                   fitView
                   fitViewOptions={{ padding: 0.2 }}
-                  minZoom={0.3}
+                  minZoom={0.6}
                   maxZoom={1.6}
                   snapToGrid
                   snapGrid={[16, 16]}
@@ -660,9 +984,11 @@ export function ChatflowEditor({
         />
         <VersionDialog
           open={versionsOpen}
-          flowId={flow.id}
+          flow={flow}
+          draft={graph}
           onOpenChange={setVersionsOpen}
           onRestored={applyRestored}
+          onHighlight={setDiff}
         />
       </div>
     </EditorUi.Provider>

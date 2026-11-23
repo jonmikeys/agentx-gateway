@@ -10,6 +10,7 @@ import {
   type FlowKind,
   type FlowNode,
   flowNodeSchema,
+  isExecutableNode,
   type NodeType,
   nodeHandles,
 } from "@/lib/agents/graph";
@@ -78,7 +79,10 @@ function buildAdjacency(graph: FlowGraph): Adjacency {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
     const source = byId.get(edge.source);
-    if (!source) continue;
+    const target = byId.get(edge.target);
+    if (!source || !target) continue;
+    // Notes and groups are purely visual: their edges never take part in validation.
+    if (!isExecutableNode(source) || !isExecutableNode(target)) continue;
     const list = outgoing.get(edge.source) ?? [];
     list.push({
       handle: handleOf(edge, source),
@@ -172,8 +176,9 @@ function structuralProblems(
   if (kind === "subflow") problems.push(...subflowProblems(graph));
   problems.push(...callSubflowProblems(graph));
 
-  const starts = graph.nodes.filter((node) => node.type === "start");
-  const inputs = graph.nodes.filter((node) => node.type === "subflow_input");
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
+  const starts = runtimeNodes.filter((node) => node.type === "start");
+  const inputs = runtimeNodes.filter((node) => node.type === "subflow_input");
   if (kind === "subflow") {
     if (starts.length > 0) {
       // Already reported by subflowProblems; avoid a duplicate "one Start" message.
@@ -201,7 +206,7 @@ function structuralProblems(
       }
     }
 
-    for (const node of graph.nodes) {
+    for (const node of runtimeNodes) {
       if (node === root) continue;
       if (!reachable.has(node.id)) {
         problems.push({
@@ -215,7 +220,7 @@ function structuralProblems(
       }
     }
 
-    for (const node of graph.nodes) {
+    for (const node of runtimeNodes) {
       if (!reachable.has(node.id)) continue;
       const handles = nodeHandles(node);
       for (const handle of handles) {
@@ -237,7 +242,7 @@ function structuralProblems(
     }
 
     const terminalTypes = kind === "subflow" ? SUBFLOW_TERMINAL_TYPES : AGENT_TERMINAL_TYPES;
-    const terminals = graph.nodes.filter(
+    const terminals = runtimeNodes.filter(
       (node) => reachable.has(node.id) && terminalTypes.includes(node.type),
     );
     if (kind === "subflow" && terminals.length === 0) {
@@ -268,7 +273,7 @@ function structuralProblems(
     visiting.delete(id);
     visited.add(id);
   };
-  for (const node of graph.nodes) visit(node.id);
+  for (const node of runtimeNodes) visit(node.id);
 
   return problems;
 }

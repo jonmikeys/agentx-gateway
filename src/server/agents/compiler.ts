@@ -1,6 +1,6 @@
 import { Annotation, END, interrupt, START, StateGraph } from "@langchain/langgraph";
 import type { ClientToolCall, ClientToolResult } from "@/lib/agents/client-tools";
-import type { FlowGraph, FlowNode } from "@/lib/agents/graph";
+import { type FlowGraph, type FlowNode, isExecutableNode } from "@/lib/agents/graph";
 import type { RunTraceStep } from "@/lib/agents/types";
 import { getCheckpointer } from "@/server/agents/checkpointer";
 import { AgentRuntimeError } from "@/server/agents/llm";
@@ -255,9 +255,11 @@ function buildGraph(graph: FlowGraph) {
     addConditionalEdges(from: string, fn: (state: AgentChannels) => string): void;
     compile(options?: { checkpointer?: unknown }): CompiledAgent;
   };
+  // Sticky notes and visual groups are canvas-only; the runtime sees a flat executable graph.
+  const runtimeNodes = graph.nodes.filter(isExecutableNode);
   const start =
-    graph.nodes.find((node) => node.type === "start") ??
-    graph.nodes.find((node) => node.type === "subflow_input");
+    runtimeNodes.find((node) => node.type === "start") ??
+    runtimeNodes.find((node) => node.type === "subflow_input");
   if (!start) {
     throw new AgentRuntimeError(
       "flow_invalid",
@@ -273,7 +275,7 @@ function buildGraph(graph: FlowGraph) {
   const canPauseForClient = (node: FlowNode) =>
     node.type === "llm" || node.type === "client_action" || node.type === "call_subflow";
 
-  for (const node of graph.nodes) {
+  for (const node of runtimeNodes) {
     builder.addNode(nameOf(node.id), nodeRunner(node));
     if (!canPauseForClient(node)) continue;
     // Pause here when the node produced client tool calls, then loop back to consume the results.
@@ -282,7 +284,7 @@ function buildGraph(graph: FlowGraph) {
   }
   builder.addEdge(START, nameOf(start.id));
 
-  for (const node of graph.nodes) {
+  for (const node of runtimeNodes) {
     if (node.type === "end" || node.type === "subflow_output") {
       builder.addEdge(nameOf(node.id), END);
       continue;

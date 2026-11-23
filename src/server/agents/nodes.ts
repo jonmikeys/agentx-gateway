@@ -839,6 +839,10 @@ export async function executeNode(
       return executeSubflowOutput(node, state, context);
     case "call_subflow":
       return executeCallSubflow(node, state, context);
+    case "note":
+    case "group":
+      // Canvas-only nodes never reach the runtime; the compiler filters them out.
+      return { next: "out" };
   }
 }
 
