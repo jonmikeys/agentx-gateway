@@ -1,5 +1,9 @@
-import { PagePlaceholder } from "@/components/app-shell/page-placeholder";
+import { ChatflowsView } from "@/app/(crm)/chatflows/chatflows-view";
+import { listFlows } from "@/server/services/agents";
 
-export default function Page() {
-  return <PagePlaceholder href="/chatflows" />;
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  const flows = await listFlows();
+  return <ChatflowsView flows={flows} />;
 }
