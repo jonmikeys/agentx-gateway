@@ -337,7 +337,7 @@ export function CamerasView({ cameras }: { cameras: CameraView[] }) {
           </Button>
         }
       />
-      <div className="rounded-lg border">
+      <div className="rounded-lg border [contain:inline-size]">
         <Table>
           <TableHeader>
             <TableRow>

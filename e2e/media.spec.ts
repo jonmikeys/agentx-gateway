@@ -94,10 +94,11 @@ test("upload an image, see its card, edit tags and disable it", async ({ page, r
   await card.getByRole("switch", { name: `Enable ${imageName}` }).click();
   await expect(card.getByText("Disabled").first()).toBeVisible();
 
-  // Kind filter hides it; clearing brings it back.
+  // Filters hide it; clearing brings it back.
   await page.getByRole("combobox", { name: "Filter by kind" }).click();
   await page.getByRole("option", { name: "Videos" }).click();
   await expect(card).toHaveCount(0);
+  await page.getByLabel("Search media").fill("nothing matches this");
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(card).toBeVisible();
 
