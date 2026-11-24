@@ -141,8 +141,10 @@ Implements the existing AGENTX session contract exactly
 - Request without `X-Session-Id` → new session; gateway generates a UUID.
 - Every successful response carries `X-Session-Id` in headers before the first SSE event.
 - Unknown/expired id → `404 {"error":{"code":"session_not_found","message":"…"}}`.
-- Idle expiry (default 30 min, configurable in Settings). No client end signal.
+- Idle expiry (default 30 min, configurable in Settings). The client end signal below is optional.
 - Admin can end a session from the CRM (next request → 404).
+- The client can end its own session: `POST /v1/sessions/{id}/end` (client API key, own
+  sessions only), always `204`, idempotent, `end_reason = client`. Optional and best effort.
 - A different `agent_id` than the session's agent → gateway ends the old session and
   returns a new `X-Session-Id` (Unity handles it as "conversation ended").
 - Every request without a header gets a new session id per the contract; sessions that end

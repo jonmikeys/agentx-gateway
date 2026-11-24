@@ -453,6 +453,27 @@ function buildPaths(): JsonObject {
       "AgentList",
       "Models & agents",
     ),
+    "/v1/sessions/{id}/end": {
+      post: {
+        tags: ["Sessions"],
+        summary: "End a session",
+        description:
+          "Tells the gateway the user left the conversation (for example back to a menu). Ends the session named by `{id}` when it is active and owned by the calling API key, so the next request with that id gets `404 session_not_found` and the CRM shows it as ended (`end_reason: client`). Idempotent and best effort: an unknown, malformed, expired, already ended or foreign id also answers `204` and changes nothing. Clients do not have to call it; idle sessions still expire on their own.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            description: "The `X-Session-Id` returned by a chat or responses reply.",
+            schema: { type: "string" },
+          },
+        ],
+        responses: {
+          "204": { description: "Handled. Nothing is returned, whatever the session's state." },
+          ...AUTH_ERRORS,
+        },
+      },
+    },
     "/v1/chat/completions": {
       post: {
         tags: ["Chat"],
@@ -560,6 +581,7 @@ export function buildOpenApiDocument(options: OpenApiOptions): JsonObject {
     tags: [
       { name: "Chat" },
       { name: "Responses" },
+      { name: "Sessions" },
       { name: "Models & agents" },
       { name: "Media" },
       { name: "Cameras" },

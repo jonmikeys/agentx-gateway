@@ -236,6 +236,70 @@ describe("sessions and transcripts", () => {
       expect(response.status).toBe(404);
     });
 
+    describe("POST /v1/sessions/{id}/end", () => {
+      const endCall = (id: string, bearer = key) =>
+        app.request(`/v1/sessions/${id}/end`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${bearer}` },
+        });
+      const rowOf = async (id: string) =>
+        (await getDb().select().from(sessions).where(eq(sessions.id, id)))[0];
+
+      it("ends the caller's active session, so the next request gets session_not_found", async () => {
+        const first = await say("ok", [{ role: "user", content: "Hi" }]);
+        await waitForRequests(first.id, 1);
+
+        const response = await endCall(first.id);
+        expect(response.status).toBe(204);
+        expect(await response.text()).toBe("");
+        expect(await rowOf(first.id)).toMatchObject({ status: "ended", endReason: "client" });
+
+        const next = await chat(
+          { model: "ok", messages: [{ role: "user", content: "Hi" }] },
+          { "X-Session-Id": first.id },
+        );
+        expect(next.status).toBe(404);
+        expect((await next.json()).error.code).toBe("session_not_found");
+      });
+
+      it("is idempotent and keeps the first end reason and time", async () => {
+        const first = await say("ok", [{ role: "user", content: "Hi" }]);
+        await waitForRequests(first.id, 1);
+        expect((await endCall(first.id)).status).toBe(204);
+        const endedAt = (await rowOf(first.id))?.endedAt;
+        expect((await endCall(first.id)).status).toBe(204);
+        expect((await rowOf(first.id))?.endedAt).toEqual(endedAt);
+      });
+
+      it("leaves an admin-ended or expired session as it was", async () => {
+        const admined = await say("ok", [{ role: "user", content: "Hi" }]);
+        await waitForRequests(admined.id, 1);
+        await adminCall(`sessions/${admined.id}/end`, "POST");
+        expect((await endCall(admined.id)).status).toBe(204);
+        expect(await rowOf(admined.id)).toMatchObject({ status: "ended", endReason: "admin" });
+      });
+
+      it("answers 204 for unknown and malformed ids", async () => {
+        expect((await endCall("00000000-0000-4000-8000-000000000000")).status).toBe(204);
+        expect((await endCall("not-a-uuid")).status).toBe(204);
+      });
+
+      it("does not end a session owned by another API key", async () => {
+        const first = await say("ok", [{ role: "user", content: "Hi" }]);
+        await waitForRequests(first.id, 1);
+        const other = await seedApiKey();
+        expect((await endCall(first.id, other.key)).status).toBe(204);
+        expect(await rowOf(first.id)).toMatchObject({ status: "active", endReason: null });
+      });
+
+      it("requires a valid API key", async () => {
+        const first = await say("ok", [{ role: "user", content: "Hi" }]);
+        await waitForRequests(first.id, 1);
+        expect((await endCall(first.id, "wrong-key")).status).toBe(401);
+        expect(await rowOf(first.id)).toMatchObject({ status: "active" });
+      });
+    });
+
     it("never requires or reads the header on GET /v1/models", async () => {
       const response = await app.request("/v1/models", {
         headers: { Authorization: `Bearer ${key}`, "X-Session-Id": "garbage" },

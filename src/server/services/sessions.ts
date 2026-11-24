@@ -103,6 +103,22 @@ export async function endSession(id: string): Promise<void> {
   }
 }
 
+/**
+ * Client action: ends the caller's own session (`POST /v1/sessions/{id}/end`). Idempotent and
+ * silent on purpose: an unknown, malformed, already ended or expired id, or one owned by another
+ * API key, changes nothing and reveals nothing, so a client can call it best effort on exit.
+ * Returns whether this call ended an active session.
+ */
+export async function endClientSession(id: string, apiKeyId: string): Promise<boolean> {
+  if (!UUID_PATTERN.test(id)) return false;
+  const rows = await getDb()
+    .update(sessions)
+    .set({ status: "ended", endReason: "client", endedAt: new Date() })
+    .where(and(eq(sessions.id, id), eq(sessions.apiKeyId, apiKeyId), eq(sessions.status, "active")))
+    .returning({ id: sessions.id });
+  return rows.length > 0;
+}
+
 export interface PersistTurnInput {
   sessionId: string;
   apiKeyId: string;
