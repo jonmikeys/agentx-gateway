@@ -45,7 +45,7 @@ export const BUILTIN_TOOL_INFO: Record<BuiltinToolName, BuiltinToolInfo> = {
     name: "video_search",
     label: "Video search",
     summary:
-      "Finds videos and returns temporary media ids; yt-dlp resolves an MP4 (at most 720p) when one is played.",
+      "Finds YouTube videos and returns temporary media ids; yt-dlp resolves an MP4 (at most 720p) when one is played.",
   },
 };
 

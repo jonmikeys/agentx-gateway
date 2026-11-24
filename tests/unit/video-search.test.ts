@@ -6,6 +6,7 @@ import {
   parseYtDlpOutput,
   setYtDlpForTests,
   YTDLP_FORMAT,
+  youtubeVideoId,
   ytDlpErrorMessage,
 } from "@/server/tools/builtin/video-resolver";
 
@@ -26,22 +27,46 @@ describe("video_search results", () => {
     expect(parseDuration(length)).toBe(seconds);
   });
 
-  it("keeps the page URL for yt-dlp and the best thumbnail", () => {
+  it.each([
+    ["https://www.youtube.com/watch?v=Da_SK3INxvw&t=4", "Da_SK3INxvw"],
+    ["https://m.youtube.com/watch?v=Da_SK3INxvw", "Da_SK3INxvw"],
+    ["https://youtu.be/Da_SK3INxvw?si=x", "Da_SK3INxvw"],
+    ["https://www.youtube.com/shorts/Da_SK3INxvw", "Da_SK3INxvw"],
+    ["https://www.youtube-nocookie.com/embed/Da_SK3INxvw", "Da_SK3INxvw"],
+    ["https://www.youtube.com/watch?v=short", undefined],
+    ["https://www.youtube.com/@channel", undefined],
+    ["https://evil.example/watch?v=Da_SK3INxvw", undefined],
+    ["https://youtube.com.evil.example/watch?v=Da_SK3INxvw", undefined],
+    ["https://vimeo.com/383815620", undefined],
+    [undefined, undefined],
+  ])("reads the YouTube id of %s", (url, id) => {
+    expect(youtubeVideoId(url)).toBe(id);
+  });
+
+  it("keeps YouTube results only, as a canonical watch URL", () => {
     expect(
       videoFromResult({
-        title: "Red panda playtime",
-        url: "https://www.youtube.com/watch?v=abc",
-        thumbnail: "https://i.ytimg.com/vi/abc/hqdefault.jpg",
+        title: "Red panda playtime - YouTube",
+        url: "https://youtu.be/Da_SK3INxvw",
+        thumbnail: "https://i.ytimg.com/vi/Da_SK3INxvw/hqdefault.jpg",
         length: "1:23",
       }),
     ).toEqual({
       kind: "video",
       title: "Red panda playtime",
-      sourcePageUrl: "https://www.youtube.com/watch?v=abc",
-      mediaUrl: "https://www.youtube.com/watch?v=abc",
-      thumbnailUrl: "https://i.ytimg.com/vi/abc/hqdefault.jpg",
+      sourcePageUrl: "https://www.youtube.com/watch?v=Da_SK3INxvw",
+      mediaUrl: "https://www.youtube.com/watch?v=Da_SK3INxvw",
+      thumbnailUrl: "https://i.ytimg.com/vi/Da_SK3INxvw/hqdefault.jpg",
       durationSeconds: 83,
     });
+    expect(
+      videoFromResult({
+        title: "Found on Bing",
+        url: "https://www.bing.com/videos/x",
+        iframe_src: "https://www.youtube-nocookie.com/embed/Da_SK3INxvw",
+      })?.mediaUrl,
+    ).toBe("https://www.youtube.com/watch?v=Da_SK3INxvw");
+    expect(videoFromResult({ title: "Vimeo", url: "https://vimeo.com/1" })).toBeUndefined();
     expect(videoFromResult({ title: "no url" })).toBeUndefined();
   });
 

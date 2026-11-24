@@ -40,12 +40,12 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
   let keyId: string;
   const ytDlpCalls: string[][] = [];
 
-  /** Fake yt-dlp: /watch/red-panda resolves to the mock /clip.mp4; other pages fail like yt-dlp. */
+  /** Fake yt-dlp: v=redpanda001 resolves to the mock /clip.mp4; unknown ids fail like yt-dlp. */
   const fakeYtDlp: YtDlpRunner = async (args) => {
     ytDlpCalls.push(args);
     const page = args.at(-1) ?? "";
     await new Promise((resolve) => setTimeout(resolve, 30));
-    if (page.endsWith("/watch/red-panda")) {
+    if (page.endsWith("v=redpanda001")) {
       return {
         code: 0,
         stderr: "",
@@ -56,7 +56,7 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
         }),
       };
     }
-    if (page.endsWith("/watch/delayed")) {
+    if (page.endsWith("v=delayed0001")) {
       return {
         code: 0,
         stderr: "",
@@ -67,14 +67,18 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
         }),
       };
     }
-    if (page.endsWith("/watch/expired")) {
+    if (page.endsWith("v=expired0001")) {
       return {
         code: 0,
         stderr: "",
         stdout: JSON.stringify({ url: `${media.url}/expired.mp4`, ext: "mp4" }),
       };
     }
-    return { code: 1, stdout: "", stderr: "ERROR: [vimeo] 1: Requested format is not available" };
+    return {
+      code: 1,
+      stdout: "",
+      stderr: "ERROR: [youtube] noformat001: Requested format is not available",
+    };
   };
 
   beforeAll(async () => {
@@ -336,16 +340,18 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
   describe("video_search", () => {
     const videoSearch = () => imageSearch({ query: "red panda" }, "video_search");
 
-    it("returns temporary video ids with length and source page", async () => {
+    it("returns temporary YouTube video ids with length and source page", async () => {
       const { results } = await videoSearch();
+      // The Vimeo result is skipped; the Bing result is YouTube by its embed URL.
       expect(results).toHaveLength(2);
       expect(results[0]).toEqual({
         media_id: expect.stringMatching(/^wm_/),
         title: "Red panda playtime",
-        description: "Web video from 127.0.0.1, 1:23.",
-        source_page: `${media.url}/watch/red-panda`,
+        description: "Web video from youtube.com, 1:23.",
+        source_page: "https://www.youtube.com/watch?v=redpanda001",
         duration_seconds: 83,
       });
+      expect(results[1].source_page).toBe("https://www.youtube.com/watch?v=noformat001");
       expect(searxng.searches[0].categories).toBe("videos");
       expect(ytDlpCalls).toHaveLength(0); // resolved lazily, not at search time
       const entry = await (await get(`/v1/media/${results[0].media_id}`)).json();
@@ -361,7 +367,10 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
       expect(full.status).toBe(200);
       expect(Buffer.from(await full.arrayBuffer())).toEqual(media.mp4);
       expect(ytDlpCalls).toHaveLength(1);
-      expect(ytDlpCalls[0].slice(-2)).toEqual(["--", `${media.url}/watch/red-panda`]);
+      expect(ytDlpCalls[0].slice(-2)).toEqual([
+        "--",
+        "https://www.youtube.com/watch?v=redpanda001",
+      ]);
       // yt-dlp's headers are forwarded upstream, cookies never.
       const upstreamCall = media.requests.find((request) => request.path === "/clip.mp4");
       expect(upstreamCall?.userAgent).toBe("yt-dlp-test");
@@ -376,7 +385,7 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
 
     it("surfaces unplayable videos as errors and does not retry", async () => {
       const { results } = await videoSearch();
-      const path = `/v1/media/${results[1].media_id}/content`; // vimeo page: no format
+      const path = `/v1/media/${results[1].media_id}/content`; // no single MP4
       const first = await get(path);
       expect(first.status).toBe(502);
       expect((await first.json()).error).toEqual({
@@ -391,7 +400,11 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
     it("waits for a link that is not valid yet, without holding up a probe", async () => {
       const { sessionId } = await videoSearch();
       const [row] = await createWebMediaItems(sessionId, keyId, [
-        { kind: "video", title: "With ad", mediaUrl: `${media.url}/watch/delayed` },
+        {
+          kind: "video",
+          title: "With ad",
+          mediaUrl: "https://www.youtube.com/watch?v=delayed0001",
+        },
       ]);
       const path = `/v1/media/${row.id}/content`;
       const head = await get(path, { method: "HEAD" });
@@ -410,7 +423,7 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
     it("fails playback when the resolved link expired", async () => {
       const { sessionId } = await videoSearch();
       const [row] = await createWebMediaItems(sessionId, keyId, [
-        { kind: "video", title: "Old", mediaUrl: `${media.url}/watch/expired` },
+        { kind: "video", title: "Old", mediaUrl: "https://youtu.be/expired0001" },
       ]);
       const response = await get(`/v1/media/${row.id}/content`);
       expect(response.status).toBe(502);
@@ -419,16 +432,14 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
       );
     });
 
-    it("never runs yt-dlp for private pages", async () => {
+    it("never runs yt-dlp for anything but YouTube", async () => {
       const { sessionId } = await videoSearch();
       const [row] = await createWebMediaItems(sessionId, keyId, [
-        { kind: "video", title: "Internal", mediaUrl: "http://192.168.1.10/watch/red-panda" },
+        { kind: "video", title: "Internal", mediaUrl: "http://192.168.1.10/watch?v=redpanda001" },
       ]);
       const response = await get(`/v1/media/${row.id}/content`);
       expect(response.status).toBe(502);
-      expect((await response.json()).error.message).toBe(
-        "Private network addresses cannot be opened.",
-      );
+      expect((await response.json()).error.message).toBe("Only YouTube videos can be played.");
       expect(ytDlpCalls).toHaveLength(0);
     });
 

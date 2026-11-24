@@ -1,8 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { getEnv } from "@/server/env";
-import { checkPublicUrl, isPublicAddress, PublicFetchError } from "@/server/net/public-fetch";
 import type { ResolvedStream, WebMediaRow } from "@/server/services/web-media";
 
 /**
@@ -18,6 +15,46 @@ export const YTDLP_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 /** Headers from yt-dlp that the proxy may forward upstream (never cookies). */
 const FORWARDED_HEADERS = new Set(["user-agent", "accept", "accept-language", "referer", "origin"]);
+
+const YOUTUBE_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtube-nocookie.com",
+  "www.youtube-nocookie.com",
+]);
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/**
+ * The video id of a YouTube watch, short, embed or youtu.be URL; undefined for anything else.
+ * Video playback supports YouTube only.
+ */
+export function youtubeVideoId(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+  const host = url.hostname.toLowerCase();
+  let id: string | undefined;
+  if (host === "youtu.be") {
+    id = url.pathname.split("/")[1];
+  } else if (YOUTUBE_HOSTS.has(host)) {
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] === "watch") id = url.searchParams.get("v") ?? undefined;
+    else if (["shorts", "embed", "live", "v"].includes(parts[0] ?? "")) id = parts[1];
+  }
+  return id && YOUTUBE_ID.test(id) ? id : undefined;
+}
+
+/** The one page URL the gateway ever hands to yt-dlp. */
+export function youtubeWatchUrl(id: string): string {
+  return `https://www.youtube.com/watch?v=${id}`;
+}
 
 export function ytDlpPath(): string {
   return getEnv().YTDLP_PATH ?? "yt-dlp";
@@ -155,29 +192,17 @@ export function isYtDlpAvailable(): boolean {
   return availability;
 }
 
-/** Refuses page URLs that point at private hosts before yt-dlp fetches them. */
-async function assertPublicPage(pageUrl: string): Promise<void> {
-  const url = checkPublicUrl(pageUrl);
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (isIP(host) !== 0) return;
-  let addresses: { address: string }[];
-  try {
-    addresses = await lookup(host, { all: true });
-  } catch {
-    throw new PublicFetchError("unreachable", "The video site could not be reached.");
-  }
-  if (addresses.length === 0 || !addresses.every((entry) => isPublicAddress(entry.address))) {
-    throw new PublicFetchError("blocked_address", "Private network addresses cannot be opened.");
-  }
-}
-
-/** Resolves a temporary video item's page to a direct stream URL. */
+/**
+ * Resolves a temporary video item to a direct stream URL. Only YouTube is supported: yt-dlp is
+ * only ever given a watch URL the gateway built from a video id, so it contacts nothing else.
+ */
 export async function resolveVideoStream(
   row: WebMediaRow,
   signal?: AbortSignal,
 ): Promise<ResolvedStream> {
-  await assertPublicPage(row.mediaUrl);
-  const result = await runner(buildYtDlpArgs(row.mediaUrl), signal);
+  const id = youtubeVideoId(row.mediaUrl);
+  if (!id) throw new Error("Only YouTube videos can be played.");
+  const result = await runner(buildYtDlpArgs(youtubeWatchUrl(id)), signal);
   if (result.code !== 0) throw new Error(ytDlpErrorMessage(result.stderr));
   return parseYtDlpOutput(result.stdout);
 }

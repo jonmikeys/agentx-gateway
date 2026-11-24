@@ -12,7 +12,11 @@ import {
   type BuiltinToolResult,
   needsSearch,
 } from "@/server/tools/builtin/types";
-import { isYtDlpAvailable } from "@/server/tools/builtin/video-resolver";
+import {
+  isYtDlpAvailable,
+  youtubeVideoId,
+  youtubeWatchUrl,
+} from "@/server/tools/builtin/video-resolver";
 import { clip } from "@/server/tools/builtin/web-search";
 
 export const MEDIA_SEARCH_DEFAULT_RESULTS = 5;
@@ -75,15 +79,20 @@ export function parseDuration(length: unknown): number | undefined {
   return seconds > 0 ? seconds : undefined;
 }
 
-/** A SearXNG video result as a temporary item: the page URL is what yt-dlp resolves later. */
+/**
+ * A SearXNG video result as a temporary item, YouTube only (from the result URL or its embed
+ * URL). The canonical watch URL is what yt-dlp resolves later; other sites are skipped.
+ */
 export function videoFromResult(result: SearxngResult): NewWebMedia | undefined {
-  if (!isHttpUrl(result.url)) return undefined;
+  const id = youtubeVideoId(result.url) ?? youtubeVideoId(result.iframe_src);
+  if (!id) return undefined;
   const thumbnail = [result.thumbnail, result.img_src, result.thumbnail_src].find(isHttpUrl);
+  const watchUrl = youtubeWatchUrl(id);
   return {
     kind: "video",
-    title: clip(result.title, 200),
-    sourcePageUrl: result.url,
-    mediaUrl: result.url,
+    title: clip(result.title, 200).replace(/\s+-\s+YouTube$/i, ""),
+    sourcePageUrl: watchUrl,
+    mediaUrl: watchUrl,
     thumbnailUrl: thumbnail,
     durationSeconds: parseDuration(result.length),
   };
@@ -134,9 +143,10 @@ export const VIDEO_PLAYBACK_UNAVAILABLE = "video playback needs yt-dlp, which wa
 export const videoSearchTool: BuiltinTool<MediaSearchArgs> = {
   name: "video_search",
   description:
-    "Search the web for videos. Each result has a media_id you can play like a media library " +
+    "Search YouTube for videos. Each result has a media_id you can play like a media library " +
     "item (for example with show_video). A video is fetched when first played; some turn out " +
-    "unplayable, which shows up as an error then. The ids last for this conversation only.",
+    "unplayable (for example age-restricted), which shows up as an error then. The ids last " +
+    "for this conversation only.",
   parameters: mediaSearchParameters("videos"),
   args: mediaSearchArgsSchema,
   availability: (context) => {

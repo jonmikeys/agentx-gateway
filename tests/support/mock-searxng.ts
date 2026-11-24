@@ -77,20 +77,28 @@ export function defaultSearchResults(mediaBaseUrl = "https://media.example.com")
     ],
     videos: [
       {
-        title: "Red panda playtime",
-        url: `${mediaBaseUrl}/watch/red-panda`,
-        iframe_src: "https://www.youtube-nocookie.com/embed/abc123",
+        title: "Red panda playtime - YouTube",
+        url: "https://www.youtube.com/watch?v=redpanda001",
         thumbnail: `${mediaBaseUrl}/red-panda-thumb.png`,
         length: "1:23",
         author: "Zoo channel",
         engine: "youtube",
       },
+      // Not YouTube: skipped (video playback supports YouTube only).
       {
         title: "Red panda in the snow",
         url: "https://vimeo.com/383815620",
         thumbnail: "https://i.vimeocdn.com/video/1.jpg",
         length: "88.0",
         engine: "vimeo",
+      },
+      // YouTube found through another engine, recognised by its embed URL.
+      {
+        title: "Red panda, no MP4",
+        url: "https://www.bing.com/videos/riverview/relatedvideo?q=red+panda",
+        iframe_src: "https://www.youtube-nocookie.com/embed/noformat001",
+        length: "88.0",
+        engine: "bing videos",
       },
     ],
   } as Record<string, Record<string, unknown>[]>;
