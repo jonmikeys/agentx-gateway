@@ -71,7 +71,7 @@ describe("yt-dlp", () => {
     expect(args[args.indexOf("--format") + 1]).toBe(YTDLP_FORMAT);
     expect(YTDLP_FORMAT).toContain("[ext=mp4]");
     expect(YTDLP_FORMAT).toContain("[height<=?720]");
-    expect(YTDLP_FORMAT).toContain("[acodec!=none]");
+    expect(YTDLP_FORMAT).toContain("[acodec!=?none]");
   });
 
   it("reads the stream URL and forwards only safe headers", () => {
@@ -96,6 +96,10 @@ describe("yt-dlp", () => {
     expect(parseYtDlpOutput(JSON.stringify({ url: "https://x/v", ext: "webm" })).mimeType).toBe(
       "video/webm",
     );
+    expect(
+      parseYtDlpOutput(JSON.stringify({ url: "https://x/v", available_at: 1795499280 }))
+        .availableAt,
+    ).toBe(1795499280000);
   });
 
   it("rejects output without a direct URL", () => {

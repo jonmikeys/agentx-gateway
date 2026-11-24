@@ -56,6 +56,17 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
         }),
       };
     }
+    if (page.endsWith("/watch/delayed")) {
+      return {
+        code: 0,
+        stderr: "",
+        stdout: JSON.stringify({
+          url: `${media.url}/clip.mp4`,
+          ext: "mp4",
+          available_at: Math.floor(Date.now() / 1000) + 1,
+        }),
+      };
+    }
     if (page.endsWith("/watch/expired")) {
       return {
         code: 0,
@@ -374,6 +385,25 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
         code: "media_unavailable",
       });
       expect((await get(path)).status).toBe(502);
+      expect(ytDlpCalls).toHaveLength(1);
+    });
+
+    it("waits for a link that is not valid yet, without holding up a probe", async () => {
+      const { sessionId } = await videoSearch();
+      const [row] = await createWebMediaItems(sessionId, keyId, [
+        { kind: "video", title: "With ad", mediaUrl: `${media.url}/watch/delayed` },
+      ]);
+      const path = `/v1/media/${row.id}/content`;
+      const head = await get(path, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(head.headers.get("content-type")).toBe("video/mp4");
+      expect(media.requests.filter((request) => request.path === "/clip.mp4")).toHaveLength(0);
+      const started = Date.now();
+      const full = await get(path);
+      expect(full.status).toBe(200);
+      expect(Buffer.from(await full.arrayBuffer())).toEqual(media.mp4);
+      // available_at has one-second resolution, plus the proxy's one-second margin.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(500);
       expect(ytDlpCalls).toHaveLength(1);
     });
 

@@ -135,6 +135,12 @@ async function serveImage(request: Request, row: WebMediaRow): Promise<Response>
 
 /** Resolutions in flight per item, so parallel first requests run the resolver once. */
 const pending = new Map<string, Promise<ResolvedStream>>();
+/** Epoch ms before which a freshly resolved link is refused by its source (in memory only). */
+const notBefore = new Map<string, number>();
+/** Longest the proxy waits for a link to become valid; YouTube's wait is the ad length. */
+export const MAX_AVAILABILITY_WAIT_MS = 30_000;
+/** Margin over the source's own timestamp, which has one-second resolution. */
+const AVAILABILITY_MARGIN_MS = 1000;
 
 async function resolveOnce(row: WebMediaRow, resolver: VideoResolver): Promise<ResolvedStream> {
   const existing = pending.get(row.id);
@@ -143,6 +149,9 @@ async function resolveOnce(row: WebMediaRow, resolver: VideoResolver): Promise<R
   const promise = resolver(row)
     .then(async (stream) => {
       await saveResolvedStream(row.id, stream);
+      if (stream.availableAt && stream.availableAt > Date.now()) {
+        notBefore.set(row.id, stream.availableAt + AVAILABILITY_MARGIN_MS);
+      }
       logger.info("web video resolved", {
         media_id: row.id,
         duration_ms: Math.round(performance.now() - started),
@@ -186,6 +195,30 @@ async function serveVideo(
       stream = await resolveOnce(row, resolver);
     } catch (error) {
       return mediaUnavailable(error instanceof Error ? error.message : "The video is unavailable.");
+    }
+  }
+  const waitUntil = notBefore.get(row.id);
+  if (waitUntil !== undefined) {
+    const waitMs = waitUntil - Date.now();
+    if (waitMs <= 0) {
+      notBefore.delete(row.id);
+    } else if (request.method === "HEAD") {
+      // A probe should not sit through the source's delay: the video resolved, so describe it.
+      return new Response(null, {
+        status: 200,
+        headers: {
+          "Content-Type": stream.mimeType,
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Disposition": "inline",
+        },
+      });
+    } else {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(waitMs, MAX_AVAILABILITY_WAIT_MS)),
+      );
+      notBefore.delete(row.id);
     }
   }
   const opened = await openUpstream({ url: stream.url, headers: stream.headers }, request);

@@ -13,7 +13,7 @@ import type { ResolvedStream, WebMediaRow } from "@/server/services/web-media";
 
 /** Best single file that already has picture and sound, MP4, direct http(s), at most 720p. */
 export const YTDLP_FORMAT =
-  "b[ext=mp4][vcodec!=none][acodec!=none][protocol~='^https?$'][height<=?720]";
+  "b[ext=mp4][vcodec!=?none][acodec!=?none][protocol~='^https?$'][height<=?720]";
 export const YTDLP_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 /** Headers from yt-dlp that the proxy may forward upstream (never cookies). */
@@ -61,7 +61,16 @@ export function parseYtDlpOutput(stdout: string): ResolvedStream {
       }
     }
   }
-  return { url, mimeType: info.ext === "webm" ? "video/webm" : "video/mp4", headers };
+  const availableAt =
+    typeof info.available_at === "number" && info.available_at > 0
+      ? info.available_at * 1000
+      : undefined;
+  return {
+    url,
+    mimeType: info.ext === "webm" ? "video/webm" : "video/mp4",
+    headers,
+    ...(availableAt ? { availableAt } : {}),
+  };
 }
 
 /** First yt-dlp error line without the `ERROR: [extractor] id:` prefix, for the model. */

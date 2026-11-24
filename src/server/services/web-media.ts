@@ -104,6 +104,11 @@ export interface ResolvedStream {
   url: string;
   mimeType: string;
   headers: Record<string, string>;
+  /**
+   * Epoch ms before which the source refuses the URL (YouTube makes a link valid only after its
+   * ad would have played). Held in memory only; never stored.
+   */
+  availableAt?: number;
 }
 
 export async function saveResolvedStream(id: string, stream: ResolvedStream): Promise<void> {
