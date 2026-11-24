@@ -7,6 +7,10 @@ The gateway ships as a Docker Compose stack with three services:
 | `app` | built from the `Dockerfile` (`agentx-gateway:local`) or the published GHCR image | Next.js standalone server, non-root user, port 3000 inside the container |
 | `postgres` | `postgres:17` | Data in the `postgres-data` volume; not published on the host |
 | `caddy` | `caddy:2` | Only with the `tls` profile: automatic HTTPS in front of `app` |
+| `searxng` | `searxng/searxng` (pinned tag) | Only with the `search` profile: web search backend for the built-in tools, internal network only. See [web-search.md](web-search.md) |
+
+The app image also bundles **yt-dlp** (pinned in the `Dockerfile`) for playing videos found by
+`video_search`; it changes only with gateway releases.
 
 Volumes: `postgres-data` (database), `media-data` (uploads, mounted at `/data/media`),
 `caddy-data` and `caddy-config` (certificates and Caddy state). Compose prefixes volume names
@@ -162,5 +166,8 @@ cannot be decrypted. Test a restore on a scratch machine before you need it.
 - Health: `GET /health` is unauthenticated and returns 503 with `"db":false` when Postgres is
   unreachable. The container `HEALTHCHECK` uses it.
 - Single Node process: horizontal scaling is not supported in v0.1.
+- Web search: `docker compose --profile search up -d` plus `SEARXNG_URL=http://searxng:8080` in
+  `.env`. The gateway fetches pages, images and video streams from the internet on the model's
+  behalf (public addresses only); allow outbound HTTPS from the app container.
 - Logs are JSON lines on stdout (`docker compose logs -f app`); `LOG_LEVEL` controls verbosity.
 - Key rotation, retention, and the admin rate limiter are covered in [operations.md](operations.md).

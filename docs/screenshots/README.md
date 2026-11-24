@@ -18,6 +18,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-light.png](state-provider-dialog-light.png) | Providers: create dialog (the key field is write-only) (light theme) |
 | ![state-provider-test-result-light.png](state-provider-test-result-light.png) | Providers: test connection result with latency and model count (light theme) |
 | ![state-route-editor-light.png](state-route-editor-light.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (light theme) |
+| ![state-route-editor-builtin-tools-light.png](state-route-editor-builtin-tools-light.png) | Model Routes: the Built-in tools section with one checkbox per gateway tool (web_search, read_web_page and image_search ticked; video_search needs yt-dlp) (light theme) |
 | ![state-api-reference-light.png](state-api-reference-light.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (light theme) |
 | ![state-chatflow-editor-light.png](state-chatflow-editor-light.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (light theme) |
 | ![state-chatflow-properties-light.png](state-chatflow-properties-light.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (light theme) |
@@ -38,6 +39,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-detail-full-light.png](state-session-detail-full-light.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (light theme) |
 | ![state-session-tool-card-light.png](state-session-tool-card-light.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (light theme) |
 | ![state-session-mcp-tools-light.png](state-session-mcp-tools-light.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (light theme) |
+| ![state-session-builtin-tool-light.png](state-session-builtin-tool-light.png) | Session transcript: a gateway-run built-in web_search call with the Built-in badge, arguments and nested results (light theme) |
 | ![state-mcp-server-dialog-light.png](state-mcp-server-dialog-light.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (light theme) |
 | ![state-mcp-tools-browser-light.png](state-mcp-tools-browser-light.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (light theme) |
 | ![state-session-responses-light.png](state-session-responses-light.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (light theme) |
@@ -64,6 +66,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-provider-dialog-dark.png](state-provider-dialog-dark.png) | Providers: create dialog (the key field is write-only) (dark theme) |
 | ![state-provider-test-result-dark.png](state-provider-test-result-dark.png) | Providers: test connection result with latency and model count (dark theme) |
 | ![state-route-editor-dark.png](state-route-editor-dark.png) | Model Routes: editor with two ordered failover steps (drag handle and arrow buttons) (dark theme) |
+| ![state-route-editor-builtin-tools-dark.png](state-route-editor-builtin-tools-dark.png) | Model Routes: the Built-in tools section with one checkbox per gateway tool (web_search, read_web_page and image_search ticked; video_search needs yt-dlp) (dark theme) |
 | ![state-api-reference-dark.png](state-api-reference-dark.png) | API reference (/docs): the chat completions operation from GET /v1/openapi.json, behind the admin sign-in (dark theme) |
 | ![state-chatflow-editor-dark.png](state-chatflow-editor-dark.png) | Chatflow editor: palette, dotted canvas with dynamic Router and error handles, minimap and auto-layout (dark theme) |
 | ![state-chatflow-properties-dark.png](state-chatflow-properties-dark.png) | Chatflow editor: properties panel generated from the node schemas (intent labels, route picker, templates) (dark theme) |
@@ -84,6 +87,7 @@ rerun the command to regenerate. 1440x900, light and dark theme, seeded with dem
 | ![state-session-detail-full-dark.png](state-session-detail-full-dark.png) | Session transcript: a long three-turn conversation with per-turn provider, latency and token metadata (dark theme) |
 | ![state-session-tool-card-dark.png](state-session-tool-card-dark.png) | Session transcript: a Unity tool call card with arguments, nested result and call-to-result duration (dark theme) |
 | ![state-session-mcp-tools-dark.png](state-session-mcp-tools-dark.png) | Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration (dark theme) |
+| ![state-session-builtin-tool-dark.png](state-session-builtin-tool-dark.png) | Session transcript: a gateway-run built-in web_search call with the Built-in badge, arguments and nested results (dark theme) |
 | ![state-mcp-server-dialog-dark.png](state-mcp-server-dialog-dark.png) | MCP Servers: create dialog (headers are write-only and encrypted at rest) (dark theme) |
 | ![state-mcp-tools-browser-dark.png](state-mcp-tools-browser-dark.png) | MCP Servers: tools browser with allow switches and a JSON Schema preview (dark theme) |
 | ![state-session-responses-dark.png](state-session-responses-dark.png) | Session transcript: a Responses API session; the per-turn badge shows translated (responses -> chat) and native (responses -> responses) turns (dark theme) |

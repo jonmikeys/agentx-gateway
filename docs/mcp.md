@@ -1,5 +1,10 @@
 # MCP servers and the plain-chat tool loop
 
+The loop below also runs the gateway's **built-in tools** (`web_search`, `read_web_page`,
+`image_search`, `video_search`). They are selected per route next to the MCP tools and behave
+exactly like MCP tools here: merged, executed by the gateway, counted against the four rounds,
+and never exposed to the client. See [web-search.md](web-search.md).
+
 ## Mental model
 
 An **MCP server** is an external service that publishes tools over the Model Context Protocol.
@@ -93,7 +98,7 @@ sequenceDiagram
 ## Transcripts
 
 Every MCP call becomes two transcript items, `tool_call` and `tool_result`, with
-`tool_source = 'mcp'`, the exposed tool name, parsed arguments, the result (or `Error: …`), and
+`tool_source = 'mcp'` (`'builtin'` for built-in tools), the exposed tool name, parsed arguments, the result (or `Error: …`), and
 `duration_ms`. The transcript viewer shows the MCP badge, the duration and an Error badge for
 failed calls. Request rows still store no content.
 
@@ -101,7 +106,9 @@ failed calls. Request rows still store no content.
 
 - **MCP Servers**: register and edit servers (headers write-only), test the connection, refresh
   `tools/list`, and browse tools with allow switches and a JSON Schema preview.
-- **Model Routes**: pick the allowed MCP tools offered on each route.
+- **Model Routes**: pick the allowed MCP tools (and built-in tools) offered on each route. A
+  client tool with the same name as a gateway tool wins: the gateway never executes a call the
+  client declared.
 
 ## Admin API
 
