@@ -482,3 +482,44 @@ export const sessionMemory = pgTable(
   },
   (table) => [primaryKey({ columns: [table.sessionId, table.key] })],
 );
+
+export type WebMediaKind = "image" | "video";
+
+/**
+ * Temporary media found by `image_search` / `video_search` (docs/web-search.md). Scoped to one
+ * session and its API key; deleted when the session ends, expires or is purged. Nothing is
+ * stored but links: `GET /v1/media/{id}/content` streams the bytes through from the source.
+ */
+export const webMediaItems = pgTable(
+  "web_media_items",
+  {
+    /** `wm_` + 16 hex characters. */
+    id: text("id").primaryKey(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    apiKeyId: uuid("api_key_id")
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<WebMediaKind>().notNull(),
+    title: text("title").notNull().default(""),
+    /** Page the result was found on (shown to the model as the source). */
+    sourcePageUrl: text("source_page_url"),
+    /** Image file URL, or the video page URL that yt-dlp resolves. */
+    mediaUrl: text("media_url").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    /** As reported by the search engine, for example `1024 × 768`. */
+    resolution: text("resolution"),
+    durationSeconds: integer("duration_seconds"),
+    /** Direct stream URL resolved lazily on first playback (videos), cached for the session. */
+    resolvedUrl: text("resolved_url"),
+    resolvedMimeType: text("resolved_mime_type"),
+    /** Request headers the resolved URL needs (from yt-dlp). */
+    resolvedHeaders: jsonb("resolved_headers").$type<Record<string, string>>(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Why resolution failed; set instead of `resolved_url`. */
+    resolveError: text("resolve_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("web_media_items_session_idx").on(table.sessionId)],
+);

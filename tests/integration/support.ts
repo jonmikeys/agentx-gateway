@@ -32,7 +32,7 @@ export async function prepareDatabase(databaseUrl: string): Promise<void> {
 /** Empties every gateway table and resets in-process state (breaker, key cache). */
 export async function resetGatewayState(): Promise<void> {
   await getDb().execute(
-    sql`truncate table settings, run_logs, session_memory, flows, flow_versions, flow_webhook_secrets, sessions, llm_requests, rate_counters, mcp_pending_messages, route_mcp_tools, mcp_tools, mcp_servers, route_steps, model_routes, api_keys, providers, media_items, cameras cascade`,
+    sql`truncate table settings, run_logs, session_memory, flows, flow_versions, flow_webhook_secrets, sessions, llm_requests, rate_counters, mcp_pending_messages, route_mcp_tools, mcp_tools, mcp_servers, route_steps, model_routes, api_keys, providers, media_items, cameras, web_media_items cascade`,
   );
   circuitBreaker.reset();
   resetMcpClients();

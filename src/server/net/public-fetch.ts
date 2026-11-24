@@ -124,15 +124,17 @@ function publicLookup(
   });
 }
 
-let agent: Dispatcher | undefined;
+const agents: { page?: Dispatcher; stream?: Dispatcher } = {};
 
-function publicAgent(): Dispatcher {
-  agent ??= new Agent({
+/** Page reads give up after 30 s without data; media streams tolerate slow readers. */
+function publicAgent(stream: boolean): Dispatcher {
+  const kind = stream ? "stream" : "page";
+  agents[kind] ??= new Agent({
     connect: { lookup: publicLookup as never, timeout: 10_000 },
     headersTimeout: 15_000,
-    bodyTimeout: 30_000,
+    bodyTimeout: stream ? 300_000 : 30_000,
   });
-  return agent;
+  return agents[kind];
 }
 
 /** Parses and checks a URL: http/https, no credentials, and no literal non-public IP. */
@@ -165,6 +167,8 @@ export interface PublicFetchOptions {
   signal?: AbortSignal;
   /** Redirect hops followed (each re-checked). Default 5. */
   maxRedirects?: number;
+  /** Long-running media stream (proxy) rather than a page read. */
+  stream?: boolean;
 }
 
 export interface PublicFetchResult {
@@ -200,7 +204,7 @@ export async function publicFetch(
         headers: options.headers,
         redirect: "manual",
         signal: options.signal,
-        dispatcher: publicAgent(),
+        dispatcher: publicAgent(options.stream === true),
       })) as unknown as Response;
     } catch (error) {
       if (isBlockedError(error)) {

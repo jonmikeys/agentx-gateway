@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUILTIN_TOOL_NAMES } from "@/lib/builtin-tools";
 import { routeGatewayTools, routeHasGatewayTools } from "@/server/gateway/gateway-tools";
 import { clientToolNames, mergeMcpTools } from "@/server/gateway/llm-proxy";
 import { searchSearxng } from "@/server/search/searxng";
@@ -170,7 +171,7 @@ describe("web_search", () => {
 describe("built-in tool registry", () => {
   it("lists tools with their availability", () => {
     const off = listBuiltinTools(null);
-    expect(off.map((tool) => tool.name)).toEqual(["web_search", "read_web_page"]);
+    expect(off.map((tool) => tool.name)).toEqual([...BUILTIN_TOOL_NAMES]);
     expect(off[0]).toMatchObject({
       available: false,
       unavailable_reason: "web search is not configured (set SEARXNG_URL)",

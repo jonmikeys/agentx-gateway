@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
-import type { BuiltinToolName } from "@/lib/builtin-tools";
+import { BUILTIN_TOOL_NAMES, type BuiltinToolName } from "@/lib/builtin-tools";
 import { createAdminApp } from "@/server/api/admin-app";
 import { createApiApp } from "@/server/api/app";
 import { closeDatabase } from "@/server/db/client";
@@ -353,10 +353,8 @@ describe("built-in web search tools", () => {
 
     it("lists built-in tools with their availability", async () => {
       const ok = await (await adminRequest("/builtin-tools")).json();
-      expect(ok.data).toEqual([
-        expect.objectContaining({ name: "web_search", available: true }),
-        expect.objectContaining({ name: "read_web_page", available: true }),
-      ]);
+      expect(ok.data.map((tool: { name: string }) => tool.name)).toEqual([...BUILTIN_TOOL_NAMES]);
+      expect(ok.data.every((tool: { available: boolean }) => tool.available)).toBe(true);
       setSearchEnv(undefined);
       const off = await (await adminRequest("/builtin-tools")).json();
       expect(off.data[0]).toMatchObject({ available: false });

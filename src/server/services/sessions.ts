@@ -8,6 +8,7 @@ import { redactText, redactValue } from "@/server/gateway/transcript/redaction";
 import { ServiceError } from "@/server/services/errors";
 import { recordLlmRequest } from "@/server/services/llm-requests";
 import { getSessionSettings } from "@/server/services/session-settings";
+import { deleteWebMediaForSessions } from "@/server/services/web-media";
 
 /** Header carrying the session id in both directions (Unity session protocol). */
 export const SESSION_HEADER = "X-Session-Id";
@@ -87,6 +88,8 @@ async function endSessionRow(
     .set({ status, endReason: reason, endedAt: new Date() })
     .where(and(eq(sessions.id, id), eq(sessions.status, "active")))
     .returning({ id: sessions.id });
+  // Temporary web media lives only as long as the session.
+  await deleteWebMediaForSessions([id]);
   return rows.length > 0;
 }
 
@@ -116,6 +119,7 @@ export async function endClientSession(id: string, apiKeyId: string): Promise<bo
     .set({ status: "ended", endReason: "client", endedAt: new Date() })
     .where(and(eq(sessions.id, id), eq(sessions.apiKeyId, apiKeyId), eq(sessions.status, "active")))
     .returning({ id: sessions.id });
+  await deleteWebMediaForSessions(rows.map((row) => row.id));
   return rows.length > 0;
 }
 

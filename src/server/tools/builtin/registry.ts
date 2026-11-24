@@ -5,6 +5,7 @@ import {
   type BuiltinToolView,
 } from "@/lib/builtin-tools";
 import { getEnv } from "@/server/env";
+import { imageSearchTool } from "@/server/tools/builtin/media-search";
 import { readWebPageTool } from "@/server/tools/builtin/read-web-page";
 import type {
   BuiltinTool,
@@ -17,6 +18,7 @@ import { webSearchTool } from "@/server/tools/builtin/web-search";
 const TOOLS: Record<BuiltinToolName, BuiltinTool> = {
   web_search: webSearchTool as unknown as BuiltinTool,
   read_web_page: readWebPageTool as unknown as BuiltinTool,
+  image_search: imageSearchTool as unknown as BuiltinTool,
 };
 
 export function getBuiltinTool(name: BuiltinToolName): BuiltinTool {
