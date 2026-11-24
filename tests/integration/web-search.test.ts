@@ -1,8 +1,12 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
+import type { BuiltinToolName } from "@/lib/builtin-tools";
 import { createAdminApp } from "@/server/api/admin-app";
 import { createApiApp } from "@/server/api/app";
 import { closeDatabase } from "@/server/db/client";
 import { resetEnvCacheForTests } from "@/server/env";
+import { setTestAllowedAddresses } from "@/server/net/public-fetch";
 import { findSessionDetail } from "@/server/services/session-queries";
 import { type MockSearxng, startMockSearxng } from "../support/mock-searxng";
 import { type MockUpstream, startMockUpstream } from "../support/mock-upstream";
@@ -17,6 +21,61 @@ import {
 } from "./support";
 
 const databaseUrl = inject("databaseUrl");
+
+const articleHtml = `<html><head><title>Red pandas</title></head><body><nav>Menu</nav><article>
+  <h1>All about red pandas</h1>${Array.from(
+    { length: 10 },
+    (_, index) =>
+      `<p>Paragraph ${index}: red pandas live in the eastern Himalayas and eat mostly bamboo leaves.</p>`,
+  ).join("")}</article><script>tracker()</script></body></html>`;
+
+const longHtml = `<html><head><title>Long</title></head><body><article>${Array.from(
+  { length: 400 },
+  (_, index) => `<p>Long paragraph number ${index} with a few more words to make it longer.</p>`,
+).join("")}</article></body></html>`;
+
+/** Local pages for read_web_page (127.0.0.1 is allowed for tests only). */
+async function startPageServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server: Server = createServer((request, response) => {
+    const path = request.url ?? "/";
+    const html = (body: string) => {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(body);
+    };
+    if (path === "/article") return html(articleHtml);
+    if (path === "/long") return html(longHtml);
+    if (path === "/js") {
+      return html('<html><body><div id="app"></div><script>boot()</script></body></html>');
+    }
+    if (path === "/redirect") {
+      response.writeHead(302, { Location: "/article" });
+      return response.end();
+    }
+    if (path === "/redirect-private") {
+      response.writeHead(302, { Location: "http://10.255.255.1/secret" });
+      return response.end();
+    }
+    if (path === "/text") {
+      response.writeHead(200, { "Content-Type": "text/plain" });
+      return response.end("plain   text\n\nsecond paragraph");
+    }
+    if (path === "/pdf") {
+      response.writeHead(200, { "Content-Type": "application/pdf" });
+      return response.end("%PDF-1.4");
+    }
+    if (path === "/big") {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      return response.end(`<html><body><p>${"big ".repeat(800_000)}</p></body></html>`);
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
 
 describe("built-in web search tools", () => {
   const app = createApiApp();
@@ -60,7 +119,7 @@ describe("built-in web search tools", () => {
     searxng.reset();
   });
 
-  function searchRoute(builtinTools: "web_search"[] = ["web_search"]) {
+  function searchRoute(builtinTools: BuiltinToolName[] = ["web_search", "read_web_page"]) {
     return seedRoute(
       "search-route",
       [{ providerId, model: "gateway-tool" }],
@@ -107,7 +166,11 @@ describe("built-in web search tools", () => {
     ]);
     // The model saw the built-in tool next to the client's; the client never sees it.
     const offered = upstream.chatRequests()[0].body?.tools as { function: { name: string } }[];
-    expect(offered.map((tool) => tool.function.name)).toEqual(["show_image", "web_search"]);
+    expect(offered.map((tool) => tool.function.name)).toEqual([
+      "show_image",
+      "web_search",
+      "read_web_page",
+    ]);
     expect(json.choices[0].message.tool_calls).toBeUndefined();
   });
 
@@ -196,6 +259,84 @@ describe("built-in web search tools", () => {
     expect(searxng.searches).toHaveLength(0);
   });
 
+  describe("read_web_page", () => {
+    let pages: Awaited<ReturnType<typeof startPageServer>>;
+
+    beforeAll(async () => {
+      pages = await startPageServer();
+    });
+
+    afterAll(async () => {
+      setTestAllowedAddresses([]);
+      await pages.close();
+    });
+
+    beforeEach(async () => {
+      setTestAllowedAddresses(["127.0.0.1"]);
+      await searchRoute();
+    });
+
+    async function read(args: Record<string, unknown>) {
+      const response = await chat({
+        model: "search-route",
+        messages: [{ role: "user", content: JSON.stringify({ tool: "read_web_page", args }) }],
+      });
+      const text = (await response.json()).choices[0].message.content as string;
+      const payload = text.slice("Result: ".length);
+      return payload.startsWith("Error:")
+        ? payload
+        : (JSON.parse(payload) as Record<string, unknown>);
+    }
+
+    it("returns the main text of a page, following redirects", async () => {
+      const page = (await read({ url: `${pages.url}/redirect` })) as Record<string, unknown>;
+      expect(page.url).toBe(`${pages.url}/article`);
+      expect(page.title).toBe("Red pandas");
+      expect(page.content).toContain("Paragraph 0: red pandas live");
+      expect(page.content).not.toContain("tracker");
+      expect(page.next_offset).toBeNull();
+    });
+
+    it("pages long text with offset", async () => {
+      const first = (await read({ url: `${pages.url}/long` })) as Record<string, unknown>;
+      expect((first.content as string).length).toBeLessThanOrEqual(8000);
+      expect(first.next_offset).toEqual(expect.any(Number));
+      const second = (await read({
+        url: `${pages.url}/long`,
+        offset: first.next_offset,
+      })) as Record<string, unknown>;
+      expect(second.offset).toBe(first.next_offset);
+      expect(second.content).not.toEqual(first.content);
+    });
+
+    it("says so when a page has no text without JavaScript", async () => {
+      const page = (await read({ url: `${pages.url}/js` })) as Record<string, unknown>;
+      expect(page.content).toBe("");
+      expect(page.note).toContain("JavaScript");
+    });
+
+    it("reads plain text and caps downloads at 2 MB", async () => {
+      const text = (await read({ url: `${pages.url}/text` })) as Record<string, unknown>;
+      expect(text.content).toBe("plain text\n\nsecond paragraph");
+      const big = (await read({ url: `${pages.url}/big` })) as Record<string, unknown>;
+      expect(big.note).toContain("2 MB");
+    });
+
+    it("refuses private addresses, also after a redirect, and non-pages", async () => {
+      const blocked = "Error: Private network addresses cannot be opened.";
+      expect(await read({ url: `${pages.url}/redirect-private` })).toBe(blocked);
+      expect(await read({ url: "http://169.254.169.254/latest/meta-data/" })).toBe(blocked);
+      setTestAllowedAddresses([]);
+      expect(await read({ url: `${pages.url}/article` })).toBe(blocked);
+      setTestAllowedAddresses(["127.0.0.1"]);
+      expect(await read({ url: `${pages.url}/pdf` })).toContain("application/pdf file");
+      expect(await read({ url: `${pages.url}/missing` })).toBe(
+        "Error: the page answered HTTP 404.",
+      );
+      expect(await read({ url: "file:///etc/passwd" })).toContain("invalid arguments");
+    });
+  });
+
   describe("admin API", () => {
     function adminRequest(path: string, init: RequestInit = {}) {
       return admin.request(`/api/admin${path}`, {
@@ -212,7 +353,10 @@ describe("built-in web search tools", () => {
 
     it("lists built-in tools with their availability", async () => {
       const ok = await (await adminRequest("/builtin-tools")).json();
-      expect(ok.data).toEqual([expect.objectContaining({ name: "web_search", available: true })]);
+      expect(ok.data).toEqual([
+        expect.objectContaining({ name: "web_search", available: true }),
+        expect.objectContaining({ name: "read_web_page", available: true }),
+      ]);
       setSearchEnv(undefined);
       const off = await (await adminRequest("/builtin-tools")).json();
       expect(off.data[0]).toMatchObject({ available: false });
