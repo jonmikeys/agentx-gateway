@@ -18,6 +18,27 @@ describe("parseEnv", () => {
     expect(env.GATEWAY_DOMAIN).toBeUndefined();
   });
 
+  it("defaults web search to off with moderate safe search", () => {
+    const env = parseEnv(valid);
+    expect(env.SEARXNG_URL).toBeUndefined();
+    expect(env.SEARCH_SAFESEARCH).toBe(1);
+  });
+
+  it("validates the web search settings", () => {
+    const env = parseEnv({ ...valid, SEARXNG_URL: "http://searxng:8080", SEARCH_SAFESEARCH: "2" });
+    expect(env.SEARXNG_URL).toBe("http://searxng:8080");
+    expect(env.SEARCH_SAFESEARCH).toBe(2);
+    try {
+      parseEnv({ ...valid, SEARXNG_URL: "searxng:8080", SEARCH_SAFESEARCH: "3" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as EnvValidationError).invalid.sort()).toEqual([
+        "SEARCH_SAFESEARCH",
+        "SEARXNG_URL",
+      ]);
+    }
+  });
+
   it("treats empty optional values as unset", () => {
     const env = parseEnv({ ...valid, PUBLIC_BASE_URL: "", LOG_LEVEL: "", MEDIA_STORAGE_DIR: "" });
     expect(env.LOG_LEVEL).toBe("info");

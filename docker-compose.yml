@@ -3,6 +3,7 @@
 #   cp .env.example .env     # fill in the required values
 #   docker compose up -d --build
 #   docker compose --profile tls up -d --build   # adds Caddy (needs GATEWAY_DOMAIN)
+#   docker compose --profile search up -d --build  # adds SearXNG for web search (docs/web-search.md)
 services:
   postgres:
     image: postgres:17
@@ -39,6 +40,23 @@ services:
       - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-3000}:3000"
     volumes:
       - media-data:/data/media
+
+  searxng:
+    # Web search backend for the built-in search tools (docs/web-search.md). Internal only:
+    # no published port; the app reaches it at http://searxng:8080 (set SEARXNG_URL to that).
+    image: searxng/searxng:2026.11.23-a7163d091
+    profiles: ["search"]
+    restart: unless-stopped
+    environment:
+      # Optional: SearXNG signs its cookies with this; the internal instance works without it.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   caddy:
     image: caddy:2
