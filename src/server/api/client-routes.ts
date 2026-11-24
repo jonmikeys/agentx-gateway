@@ -41,7 +41,12 @@ import {
   selectRoute,
 } from "@/server/services/routes";
 import { recordRunLog } from "@/server/services/run-logs";
-import { persistRequest, resolveSession, SESSION_HEADER } from "@/server/services/sessions";
+import {
+  endClientSession,
+  persistRequest,
+  resolveSession,
+  SESSION_HEADER,
+} from "@/server/services/sessions";
 
 /** Fields consumed by the gateway that must never reach the upstream provider. */
 const GATEWAY_ONLY_FIELDS = ["agent_id"];
@@ -625,6 +630,13 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
         })),
       ],
     });
+  });
+
+  // Best-effort "the user left" signal. Always 204: see `endClientSession`.
+  app.post("/v1/sessions/:id/end", async (c) => {
+    const ended = await endClientSession(c.req.param("id"), c.get("apiKey").id);
+    if (ended) logger.info("session ended by client", { session_id: c.req.param("id") });
+    return c.body(null, 204);
   });
 
   app.post("/v1/chat/completions", async (c) => {

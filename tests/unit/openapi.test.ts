@@ -49,6 +49,7 @@ describe("OpenAPI document", () => {
         "/v1/models",
         "/v1/openapi.json",
         "/v1/responses",
+        "/v1/sessions/{id}/end",
       ].sort(),
     );
   });

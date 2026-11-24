@@ -205,7 +205,7 @@ const tsvector = customType<{ data: string }>({
 });
 
 export type SessionStatus = "active" | "expired" | "ended";
-export type SessionEndReason = "idle" | "admin" | "agent_changed" | (string & {});
+export type SessionEndReason = "idle" | "admin" | "agent_changed" | "client" | (string & {});
 
 /**
  * One conversation, identified by the `X-Session-Id` the client echoes. `agent_id` and

@@ -18,6 +18,7 @@ repository (read it first if you are writing a client); the reference stateful s
 | header present, session active and not idle | Continues it. `200` with the same `X-Session-Id` |
 | header present, id unknown, expired, ended, or owned by another API key | `404 {"error":{"message","type":"invalid_request_error","code":"session_not_found"}}` |
 | header present, session idle longer than the timeout | Expired on the spot, then the same `404` |
+| `POST /v1/sessions/{id}/end` | Ends the caller's own active session (`end_reason = client`) and answers `204` with no body, whatever the id's state: unknown, malformed, expired, already ended and other-key ids also answer `204` and change nothing |
 | `GET /v1/models` | Never requires or reads the header |
 
 `X-Session-Id` is in the **response head** for JSON and for SSE, before the first `data:` event.
@@ -44,6 +45,16 @@ sequenceDiagram
     C->>G: retry once without a header
     G-->>C: 200, X-Session-Id: Bar
 ```
+
+### Ending a session from the client
+
+A client that knows the user left (Unity returning to its main menu) may call
+`POST /v1/sessions/{id}/end` with the same API key it chats with. The call is optional and best
+effort: idle sessions still expire on their own, and the endpoint never fails for a state the
+client cannot act on, so a client sends it once and ignores the answer. The session shows in the
+CRM as `ended` with end reason `client`, and the next chat request with that id gets the usual
+`404 session_not_found`. Only the key that owns the session can end it; another key's call is a
+silent no-op, so ids cannot be probed.
 
 ### Agents
 
