@@ -8,6 +8,7 @@ import { setTestAllowedAddresses } from "@/server/net/public-fetch";
 import { expireIdleSessions } from "@/server/services/session-maintenance";
 import { endSession } from "@/server/services/sessions";
 import { createWebMediaItems, type NewWebMedia } from "@/server/services/web-media";
+import { setYtDlpForTests, type YtDlpRunner } from "@/server/tools/builtin/video-resolver";
 import { type MockSearxng, startMockSearxng } from "../support/mock-searxng";
 import { type MockUpstream, startMockUpstream } from "../support/mock-upstream";
 import { type MockWebMedia, startMockWebMedia } from "../support/mock-web-media";
@@ -37,6 +38,33 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
   let media: MockWebMedia;
   let key: string;
   let keyId: string;
+  const ytDlpCalls: string[][] = [];
+
+  /** Fake yt-dlp: /watch/red-panda resolves to the mock /clip.mp4; other pages fail like yt-dlp. */
+  const fakeYtDlp: YtDlpRunner = async (args) => {
+    ytDlpCalls.push(args);
+    const page = args.at(-1) ?? "";
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (page.endsWith("/watch/red-panda")) {
+      return {
+        code: 0,
+        stderr: "",
+        stdout: JSON.stringify({
+          url: `${media.url}/clip.mp4`,
+          ext: "mp4",
+          http_headers: { "User-Agent": "yt-dlp-test", Cookie: "never" },
+        }),
+      };
+    }
+    if (page.endsWith("/watch/expired")) {
+      return {
+        code: 0,
+        stderr: "",
+        stdout: JSON.stringify({ url: `${media.url}/expired.mp4`, ext: "mp4" }),
+      };
+    }
+    return { code: 1, stdout: "", stderr: "ERROR: [vimeo] 1: Requested format is not available" };
+  };
 
   beforeAll(async () => {
     await prepareDatabase(databaseUrl);
@@ -51,6 +79,7 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
     delete process.env.SEARXNG_URL;
     resetEnvCacheForTests();
     setTestAllowedAddresses([]);
+    setYtDlpForTests(undefined);
     await resetGatewayState();
     await upstream.close();
     await searxng.close();
@@ -70,8 +99,10 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
       [{ providerId: provider.id, model: "gateway-tool" }],
       true,
       [],
-      ["image_search"],
+      ["image_search", "video_search"],
     );
+    ytDlpCalls.length = 0;
+    setYtDlpForTests({ available: true, runner: fakeYtDlp });
   });
 
   afterEach(() => {
@@ -87,14 +118,17 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
     });
   }
 
-  /** Runs image_search through the tool loop; returns the session id and the results. */
-  async function imageSearch(args: Record<string, unknown> = { query: "red panda" }) {
+  /** Runs a media search through the tool loop; returns the session id and the results. */
+  async function imageSearch(
+    args: Record<string, unknown> = { query: "red panda" },
+    tool = "image_search",
+  ) {
     const response = await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "search-route",
-        messages: [{ role: "user", content: JSON.stringify({ tool: "image_search", args }) }],
+        messages: [{ role: "user", content: JSON.stringify({ tool, args }) }],
       }),
     });
     expect(response.status).toBe(200);
@@ -286,6 +320,94 @@ describe("temporary web media: image_search, look-up and streaming proxy", () =>
     await (await get(`/v1/media/${results[0].media_id}/content`)).arrayBuffer();
     const [row] = await getDb().select().from(sessions).where(eq(sessions.id, sessionId));
     expect(row.lastActivityAt.getTime()).toBeGreaterThan(stale.getTime() + 60_000);
+  });
+
+  describe("video_search", () => {
+    const videoSearch = () => imageSearch({ query: "red panda" }, "video_search");
+
+    it("returns temporary video ids with length and source page", async () => {
+      const { results } = await videoSearch();
+      expect(results).toHaveLength(2);
+      expect(results[0]).toEqual({
+        media_id: expect.stringMatching(/^wm_/),
+        title: "Red panda playtime",
+        description: "Web video from 127.0.0.1, 1:23.",
+        source_page: `${media.url}/watch/red-panda`,
+        duration_seconds: 83,
+      });
+      expect(searxng.searches[0].categories).toBe("videos");
+      expect(ytDlpCalls).toHaveLength(0); // resolved lazily, not at search time
+      const entry = await (await get(`/v1/media/${results[0].media_id}`)).json();
+      expect(entry).toMatchObject({ kind: "video", mime_type: "video/mp4", tags: ["web"] });
+    });
+
+    it("resolves once on first playback, caches it, and streams with Range", async () => {
+      const { results } = await videoSearch();
+      const path = `/v1/media/${results[0].media_id}/content`;
+      const [head, full] = await Promise.all([get(path, { method: "HEAD" }), get(path)]);
+      expect(head.status).toBe(200);
+      expect(head.headers.get("content-type")).toBe("video/mp4");
+      expect(full.status).toBe(200);
+      expect(Buffer.from(await full.arrayBuffer())).toEqual(media.mp4);
+      expect(ytDlpCalls).toHaveLength(1);
+      expect(ytDlpCalls[0].slice(-2)).toEqual(["--", `${media.url}/watch/red-panda`]);
+      // yt-dlp's headers are forwarded upstream, cookies never.
+      const upstreamCall = media.requests.find((request) => request.path === "/clip.mp4");
+      expect(upstreamCall?.userAgent).toBe("yt-dlp-test");
+
+      const partial = await get(path, { headers: { Range: "bytes=100-199" } });
+      expect(partial.status).toBe(206);
+      expect(partial.headers.get("content-range")).toBe(`bytes 100-199/${media.mp4.length}`);
+      expect(partial.headers.get("accept-ranges")).toBe("bytes");
+      expect(Buffer.from(await partial.arrayBuffer())).toEqual(media.mp4.subarray(100, 200));
+      expect(ytDlpCalls).toHaveLength(1);
+    });
+
+    it("surfaces unplayable videos as errors and does not retry", async () => {
+      const { results } = await videoSearch();
+      const path = `/v1/media/${results[1].media_id}/content`; // vimeo page: no format
+      const first = await get(path);
+      expect(first.status).toBe(502);
+      expect((await first.json()).error).toEqual({
+        message: "This video has no MP4 with picture and sound at 720p or below.",
+        type: "api_error",
+        code: "media_unavailable",
+      });
+      expect((await get(path)).status).toBe(502);
+      expect(ytDlpCalls).toHaveLength(1);
+    });
+
+    it("fails playback when the resolved link expired", async () => {
+      const { sessionId } = await videoSearch();
+      const [row] = await createWebMediaItems(sessionId, keyId, [
+        { kind: "video", title: "Old", mediaUrl: `${media.url}/watch/expired` },
+      ]);
+      const response = await get(`/v1/media/${row.id}/content`);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toBe(
+        "The video source answered HTTP 403; the link may have expired.",
+      );
+    });
+
+    it("never runs yt-dlp for private pages", async () => {
+      const { sessionId } = await videoSearch();
+      const [row] = await createWebMediaItems(sessionId, keyId, [
+        { kind: "video", title: "Internal", mediaUrl: "http://192.168.1.10/watch/red-panda" },
+      ]);
+      const response = await get(`/v1/media/${row.id}/content`);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toBe(
+        "Private network addresses cannot be opened.",
+      );
+      expect(ytDlpCalls).toHaveLength(0);
+    });
+
+    it("is not offered when yt-dlp is missing", async () => {
+      setYtDlpForTests({ available: false });
+      await videoSearch().catch(() => undefined);
+      const offered = upstream.chatRequests()[0].body?.tools as { function: { name: string } }[];
+      expect(offered.map((tool) => tool.function.name)).toEqual(["image_search"]);
+    });
   });
 
   it("reports when nothing usable was found", async () => {

@@ -9,6 +9,7 @@ import { serveWebMedia } from "@/server/media/web-proxy";
 import { listEnabledCameras, toCameraCatalogueEntry } from "@/server/services/cameras";
 import { findMedia, listEnabledMedia, toCatalogueEntry } from "@/server/services/media";
 import { findOwnedWebMedia, isWebMediaId, toWebMediaEntry } from "@/server/services/web-media";
+import { resolveVideoStream } from "@/server/tools/builtin/video-resolver";
 
 /** Registers the authenticated media and camera catalogue routes (`/v1/media`, `/v1/cameras`). */
 export function registerMediaRoutes(app: Hono<ClientEnv>): void {
@@ -39,7 +40,7 @@ export function registerMediaRoutes(app: Hono<ClientEnv>): void {
       // Only the owning API key's active session may stream it; anything else looks unknown.
       const item = await findOwnedWebMedia(id, c.get("apiKey").id);
       if (!item) return openAIError(404, "media_not_found", `No media item ${id}.`);
-      return serveWebMedia(c.req.raw, item);
+      return serveWebMedia(c.req.raw, item, { resolveVideo: resolveVideoStream });
     }
     const row = await findMedia(id);
     // Disabled items are invisible to clients, exactly like unknown ids. The code is

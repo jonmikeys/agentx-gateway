@@ -8,6 +8,7 @@ import { closeDatabase } from "@/server/db/client";
 import { resetEnvCacheForTests } from "@/server/env";
 import { setTestAllowedAddresses } from "@/server/net/public-fetch";
 import { findSessionDetail } from "@/server/services/session-queries";
+import { setYtDlpForTests } from "@/server/tools/builtin/video-resolver";
 import { type MockSearxng, startMockSearxng } from "../support/mock-searxng";
 import { type MockUpstream, startMockUpstream } from "../support/mock-upstream";
 import {
@@ -97,10 +98,12 @@ describe("built-in web search tools", () => {
     await prepareDatabase(databaseUrl);
     upstream = await startMockUpstream();
     searxng = await startMockSearxng();
+    setYtDlpForTests({ available: true });
   });
 
   afterAll(async () => {
     setSearchEnv(undefined);
+    setYtDlpForTests(undefined);
     await resetGatewayState();
     await upstream.close();
     await searxng.close();

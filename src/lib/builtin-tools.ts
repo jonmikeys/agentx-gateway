@@ -5,7 +5,12 @@ import { z } from "zod";
  * tools; the gateway executes them in the plain-chat tool loop and never exposes them to the
  * client. Shared by the CRM (labels) and the server (validation, registry).
  */
-export const BUILTIN_TOOL_NAMES = ["web_search", "read_web_page", "image_search"] as const;
+export const BUILTIN_TOOL_NAMES = [
+  "web_search",
+  "read_web_page",
+  "image_search",
+  "video_search",
+] as const;
 
 export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
 
@@ -35,6 +40,12 @@ export const BUILTIN_TOOL_INFO: Record<BuiltinToolName, BuiltinToolInfo> = {
     label: "Image search",
     summary:
       "Finds images and returns temporary media ids the client can show; the gateway streams them through.",
+  },
+  video_search: {
+    name: "video_search",
+    label: "Video search",
+    summary:
+      "Finds videos and returns temporary media ids; yt-dlp resolves an MP4 (at most 720p) when one is played.",
   },
 };
 

@@ -1,5 +1,5 @@
 import { asc, eq, inArray } from "drizzle-orm";
-import type { BuiltinToolName } from "@/lib/builtin-tools";
+import { BUILTIN_TOOL_NAMES, type BuiltinToolName } from "@/lib/builtin-tools";
 import type { RouteWriteInput } from "@/lib/gateway-schemas";
 import { getDb } from "@/server/db/client";
 import { modelRoutes, providers, routeMcpTools, routeSteps } from "@/server/db/schema";
@@ -86,7 +86,8 @@ async function loadStepViews(routeIds: string[]): Promise<Map<string, RouteStepV
 
 /** Stored names that still exist in the catalogue, in catalogue order. */
 function knownBuiltinTools(stored: readonly string[]): BuiltinToolName[] {
-  return availableBuiltinTools(stored, { url: "", safesearch: 1 });
+  const wanted = new Set(stored);
+  return BUILTIN_TOOL_NAMES.filter((name) => wanted.has(name));
 }
 
 function toView(row: RouteRow, steps: RouteStepView[], mcpToolIds: string[]): RouteView {

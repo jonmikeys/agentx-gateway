@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BUILTIN_TOOL_NAMES } from "@/lib/builtin-tools";
 import { routeGatewayTools, routeHasGatewayTools } from "@/server/gateway/gateway-tools";
 import { clientToolNames, mergeMcpTools } from "@/server/gateway/llm-proxy";
@@ -9,9 +9,13 @@ import {
   runBuiltinTool,
 } from "@/server/tools/builtin/registry";
 import type { BuiltinToolContext } from "@/server/tools/builtin/types";
+import { setYtDlpForTests } from "@/server/tools/builtin/video-resolver";
 import { clip } from "@/server/tools/builtin/web-search";
 
 const search = { url: "http://searxng.test:8080", safesearch: 1 as const };
+
+beforeAll(() => setYtDlpForTests({ available: true }));
+afterAll(() => setYtDlpForTests(undefined));
 
 function jsonFetch(body: unknown, status = 200, seen: URL[] = []): typeof fetch {
   return (async (input: RequestInfo | URL) => {

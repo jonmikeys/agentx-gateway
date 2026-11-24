@@ -12,6 +12,7 @@ import {
   type BuiltinToolResult,
   needsSearch,
 } from "@/server/tools/builtin/types";
+import { isYtDlpAvailable } from "@/server/tools/builtin/video-resolver";
 import { clip } from "@/server/tools/builtin/web-search";
 
 export const MEDIA_SEARCH_DEFAULT_RESULTS = 5;
@@ -59,6 +60,35 @@ export function imageFromResult(result: SearxngResult): NewWebMedia | undefined 
   };
 }
 
+/** Search engine lengths: `"1:23"`, `"1:02:05"`, `"88.0"` (seconds) or a number. */
+export function parseDuration(length: unknown): number | undefined {
+  if (typeof length === "number")
+    return Number.isFinite(length) && length > 0 ? Math.round(length) : undefined;
+  if (typeof length !== "string") return undefined;
+  const text = length.trim();
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const seconds = Math.round(Number(text));
+    return seconds > 0 ? seconds : undefined;
+  }
+  if (!/^\d{1,3}(:\d{1,2}){1,2}$/.test(text)) return undefined;
+  const seconds = text.split(":").reduce((total, part) => total * 60 + Number(part), 0);
+  return seconds > 0 ? seconds : undefined;
+}
+
+/** A SearXNG video result as a temporary item: the page URL is what yt-dlp resolves later. */
+export function videoFromResult(result: SearxngResult): NewWebMedia | undefined {
+  if (!isHttpUrl(result.url)) return undefined;
+  const thumbnail = [result.thumbnail, result.img_src, result.thumbnail_src].find(isHttpUrl);
+  return {
+    kind: "video",
+    title: clip(result.title, 200),
+    sourcePageUrl: result.url,
+    mediaUrl: result.url,
+    thumbnailUrl: thumbnail,
+    durationSeconds: parseDuration(result.length),
+  };
+}
+
 /**
  * Searches one SearXNG category, stores the usable results as temporary media items for the
  * session, and returns them with their ids. The ids work wherever a media catalogue id does
@@ -98,6 +128,24 @@ export async function runMediaSearch(
   }));
   return { text: JSON.stringify({ results }), isError: false };
 }
+
+export const VIDEO_PLAYBACK_UNAVAILABLE = "video playback needs yt-dlp, which was not found";
+
+export const videoSearchTool: BuiltinTool<MediaSearchArgs> = {
+  name: "video_search",
+  description:
+    "Search the web for videos. Each result has a media_id you can play like a media library " +
+    "item (for example with show_video). A video is fetched when first played; some turn out " +
+    "unplayable, which shows up as an error then. The ids last for this conversation only.",
+  parameters: mediaSearchParameters("videos"),
+  args: mediaSearchArgsSchema,
+  availability: (context) => {
+    const search = needsSearch(context);
+    if (search !== true) return search;
+    return isYtDlpAvailable() ? true : VIDEO_PLAYBACK_UNAVAILABLE;
+  },
+  execute: (args, context) => runMediaSearch("videos", videoFromResult, args, context),
+};
 
 export const imageSearchTool: BuiltinTool<MediaSearchArgs> = {
   name: "image_search",

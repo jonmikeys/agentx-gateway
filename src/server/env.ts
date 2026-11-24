@@ -48,6 +48,8 @@ export const envSchema = z.object({
     .transform((value) => value ?? "1")
     .pipe(z.enum(["0", "1", "2"]))
     .transform(Number),
+  /** yt-dlp executable for video_search playback; the Docker image bundles it on PATH. */
+  YTDLP_PATH: optionalText,
 });
 
 export type Env = z.infer<typeof envSchema>;

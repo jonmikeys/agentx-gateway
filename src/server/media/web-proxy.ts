@@ -25,7 +25,7 @@ interface Candidate {
 }
 
 function mediaUnavailable(message: string): Response {
-  return openAIError(502, "media_unavailable", message);
+  return openAIError(502, "media_unavailable", message, "api_error");
 }
 
 function baseType(response: Response): string {
