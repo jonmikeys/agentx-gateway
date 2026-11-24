@@ -57,6 +57,13 @@
       "when": 1795423988762,
       "tag": "0007_sturdy_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795496994711,
+      "tag": "0008_awesome_raza",
+      "breakpoints": true
     }
   ]
 }

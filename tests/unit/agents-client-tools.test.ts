@@ -73,6 +73,7 @@ const route: ResolvedRoute = {
     },
   ],
   mcpTools: [],
+  builtinTools: [],
 };
 
 function completion(message: Record<string, unknown>): Response {

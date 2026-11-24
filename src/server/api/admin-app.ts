@@ -11,6 +11,7 @@ import { createRoutesApp } from "@/server/api/admin/routes";
 import { createSessionsApp } from "@/server/api/admin/sessions";
 import { createSettingsApp } from "@/server/api/admin/settings";
 import { guardAdminRequest } from "@/server/auth/admin-auth";
+import { listBuiltinTools } from "@/server/tools/builtin/registry";
 
 type AdminEnv = { Variables: { adminUsername: string } };
 
@@ -40,6 +41,8 @@ export function createAdminApp(): Hono<AdminEnv> {
   admin.route("/api/admin/mcp-servers", createMcpServersApp());
   admin.route("/api/admin/mcp-tools", createMcpToolsApp());
   admin.route("/api/admin/flows", createFlowsApp());
+  // Built-in gateway tools and whether this deployment can run them (docs/web-search.md).
+  admin.get("/api/admin/builtin-tools", (c) => c.json({ data: listBuiltinTools() }));
 
   admin.notFound((c) =>
     c.json({ error: { code: "not_found", message: "Unknown admin route" } }, 404),

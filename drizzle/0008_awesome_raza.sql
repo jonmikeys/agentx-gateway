@@ -1,0 +1,1 @@
+ALTER TABLE "model_routes" ADD COLUMN "builtin_tools" text[] DEFAULT '{}'::text[] NOT NULL;

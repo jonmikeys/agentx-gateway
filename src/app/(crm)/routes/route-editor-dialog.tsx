@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
+import type { BuiltinToolName, BuiltinToolView } from "@/lib/builtin-tools";
 import { routeWriteSchema } from "@/lib/gateway-schemas";
 import type { ProviderTestResult } from "@/server/gateway/provider-test";
 import type { McpToolView } from "@/server/services/mcp";
@@ -68,6 +70,7 @@ const formSchema = z.object({
     )
     .min(1, "Add at least one step"),
   mcp_tool_ids: z.array(z.string()),
+  builtin_tools: routeWriteSchema.shape.builtin_tools.unwrap(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -221,6 +224,7 @@ export function RouteEditorDialog({
   route,
   providers,
   mcpTools,
+  builtinTools,
   onOpenChange,
 }: {
   open: boolean;
@@ -229,6 +233,8 @@ export function RouteEditorDialog({
   providers: ProviderView[];
   /** Allowed MCP tools on enabled servers, for the picker. */
   mcpTools: McpToolView[];
+  /** Every built-in tool with its availability on this deployment. */
+  builtinTools: BuiltinToolView[];
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
@@ -249,6 +255,7 @@ export function RouteEditorDialog({
       enabled: true,
       steps: [newStep()],
       mcp_tool_ids: [],
+      builtin_tools: [],
     },
   });
   const { fields, append, remove, move } = useFieldArray({ control, name: "steps" });
@@ -257,6 +264,15 @@ export function RouteEditorDialog({
   const toolsByServer = new Map<string, McpToolView[]>();
   for (const tool of mcpTools) {
     toolsByServer.set(tool.server_name, [...(toolsByServer.get(tool.server_name) ?? []), tool]);
+  }
+
+  const selectedBuiltins = useWatch({ control, name: "builtin_tools" }) ?? [];
+
+  function toggleBuiltin(name: BuiltinToolName, checked: boolean) {
+    const next = checked
+      ? [...new Set([...selectedBuiltins, name])]
+      : selectedBuiltins.filter((value) => value !== name);
+    setValue("builtin_tools", next, { shouldDirty: true });
   }
 
   function toggleTool(id: string, checked: boolean) {
@@ -299,6 +315,7 @@ export function RouteEditorDialog({
               timeout_ms: String(step.timeout_ms),
             })),
             mcp_tool_ids: route.mcp_tool_ids,
+            builtin_tools: route.builtin_tools,
           }
         : {
             slug: "",
@@ -306,6 +323,7 @@ export function RouteEditorDialog({
             enabled: true,
             steps: [newStep()],
             mcp_tool_ids: [],
+            builtin_tools: [],
           },
     );
     for (const step of route?.steps ?? []) void loadModels(step.provider_id);
@@ -333,6 +351,7 @@ export function RouteEditorDialog({
         timeout_ms: Number(step.timeout_ms),
       })),
       mcp_tool_ids: values.mcp_tool_ids,
+      builtin_tools: values.builtin_tools,
     };
     try {
       await adminFetch(route ? `routes/${route.id}` : "routes", {
@@ -427,6 +446,43 @@ export function RouteEditorDialog({
               </DndContext>
               {errors.steps?.root && <FieldError errors={[errors.steps.root]} />}
               {errors.steps?.message && <FieldError>{errors.steps.message}</FieldError>}
+            </div>
+            <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-medium">Built-in tools</h3>
+                <Badge variant="outline">{selectedBuiltins.length} selected</Badge>
+              </div>
+              <FieldDescription>
+                Tools the gateway runs itself on plain chats (not inside agents). Off by default.
+              </FieldDescription>
+              <div className="flex flex-col gap-2 rounded-lg border p-3">
+                {builtinTools.map((tool) => {
+                  const id = `route-builtin-${tool.name}`;
+                  return (
+                    <div key={tool.name} className="flex items-start gap-2">
+                      <Checkbox
+                        id={id}
+                        className="mt-0.5"
+                        checked={selectedBuiltins.includes(tool.name)}
+                        onCheckedChange={(checked) => toggleBuiltin(tool.name, checked === true)}
+                      />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <label htmlFor={id} className="flex flex-wrap items-center gap-2 text-sm">
+                          <span>{tool.label}</span>
+                          <code className="font-mono text-xs text-muted-foreground">
+                            {tool.name}
+                          </code>
+                          {!tool.available && <Badge variant="outline">Not configured</Badge>}
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {tool.summary}
+                          {!tool.available && ` Unavailable: ${tool.unavailable_reason}.`}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="flex flex-col gap-2 border-t pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">

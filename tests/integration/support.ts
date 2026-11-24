@@ -1,4 +1,5 @@
-﻿import { sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
+import type { BuiltinToolName } from "@/lib/builtin-tools";
 import { closeDatabase, getDb } from "@/server/db/client";
 import { runMigrations } from "@/server/db/migrate";
 import { resetEnvCacheForTests } from "@/server/env";
@@ -72,6 +73,7 @@ export async function seedRoute(
   steps: SeedStep[],
   enabled = true,
   mcpToolIds: string[] = [],
+  builtinTools: BuiltinToolName[] = [],
 ) {
   return createRoute({
     slug,
@@ -83,6 +85,7 @@ export async function seedRoute(
       timeout_ms: step.timeoutMs ?? 5000,
     })),
     mcp_tool_ids: mcpToolIds,
+    builtin_tools: builtinTools,
   });
 }
 

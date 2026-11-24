@@ -38,7 +38,7 @@ export interface TranscriptItemView {
   tool_call_id: string | null;
   tool_name: string | null;
   tool_args: unknown;
-  tool_source: "client" | "mcp" | null;
+  tool_source: "client" | "mcp" | "builtin" | null;
   /** MCP call duration; null for client tools (derived from timestamps in the viewer). */
   duration_ms: number | null;
   llm_request_id: string | null;

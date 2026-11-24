@@ -244,7 +244,7 @@ export async function persistRequest(
         toolCallId: item.toolCallId,
         toolName: item.toolName,
         toolArgs: item.kind === "tool_call" ? cleanValue(item.toolArgs ?? null) : null,
-        toolSource: "mcp",
+        toolSource: item.source ?? "mcp",
         durationMs: item.durationMs,
       });
     }

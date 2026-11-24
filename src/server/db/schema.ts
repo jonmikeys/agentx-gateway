@@ -58,6 +58,8 @@ export const modelRoutes = pgTable(
     description: text("description").notNull().default(""),
     enabled: boolean("enabled").notNull().default(true),
     isDefault: boolean("is_default").notNull().default(false),
+    /** Built-in gateway tools offered on this route (docs/web-search.md); off by default. */
+    builtinTools: text("builtin_tools").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -276,8 +278,8 @@ export const transcriptItems = pgTable(
     toolCallId: text("tool_call_id"),
     toolName: text("tool_name"),
     toolArgs: jsonb("tool_args").$type<unknown>(),
-    toolSource: text("tool_source").$type<"client" | "mcp">(),
-    /** How long an MCP tool call took; null for client tools (the UI derives those from timestamps). */
+    toolSource: text("tool_source").$type<"client" | "mcp" | "builtin">(),
+    /** How long a gateway (MCP or built-in) tool call took; null for client tools (the UI derives those from timestamps). */
     durationMs: integer("duration_ms"),
     llmRequestId: uuid("llm_request_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

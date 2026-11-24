@@ -20,6 +20,7 @@ function quote(content: string): string {
 
 function sourceLabel(item: TranscriptItemView): string {
   if (item.tool_source === "mcp") return "MCP";
+  if (item.tool_source === "builtin") return "Built-in";
   if (item.tool_source === "client") return "Unity";
   return "client";
 }

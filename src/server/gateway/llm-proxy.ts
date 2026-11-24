@@ -2,7 +2,7 @@
 import { openAIError } from "@/server/api/errors";
 import type { LlmApi, RequestAttempt, TokenUsage } from "@/server/db/schema";
 import { type CircuitBreaker, circuitBreaker } from "@/server/gateway/circuit-breaker";
-import { callMcpTool } from "@/server/gateway/mcp-client";
+import { type GatewayTool, routeGatewayTools } from "@/server/gateway/gateway-tools";
 import { chatCompletionToResponse } from "@/server/gateway/responses/response-translate";
 import {
   ChatToResponsesStream,
@@ -34,9 +34,14 @@ import type { ResolvedRoute, ResolvedStep } from "@/server/services/routes";
 /** At most four upstream rounds on a route with MCP tools; the fourth is called with none. */
 export const MAX_MCP_ROUNDS = 4;
 
-/** One MCP call observed during a request, persisted as transcript items (tool_source = mcp). */
+/**
+ * One gateway tool call (MCP or built-in) observed during a request, persisted as transcript
+ * items with `tool_source` = `source`.
+ */
 export interface McpTranscriptItem {
   kind: "tool_call" | "tool_result";
+  /** Absent means `mcp`. */
+  source?: "mcp" | "builtin";
   toolCallId: string;
   toolName: string;
   toolArgs?: unknown;
@@ -69,7 +74,7 @@ export interface RequestOutcome {
   usage?: TokenUsage;
   /** What the assistant produced; held in memory and persisted by the caller after completion. */
   captured?: CapturedResponse;
-  /** MCP calls executed by the gateway during this request. */
+  /** Gateway tool calls (MCP and built-in) executed during this request. */
   mcpItems?: McpTranscriptItem[];
 }
 
@@ -93,6 +98,11 @@ export interface LlmProxyInput {
   fetchImpl?: typeof fetch;
   /** Needed to re-inject mixed-round MCP messages and to persist new pending ones. */
   sessionId?: string;
+  /**
+   * Tools the gateway executes in the loop (MCP and built-in). Defaults to the route's MCP tools;
+   * callers pass the full list built with a request context (see `routeGatewayTools`).
+   */
+  gatewayTools?: GatewayTool[];
 }
 
 type StepResult =
@@ -304,11 +314,14 @@ function summarizeAttempts(attempts: RequestAttempt[]): string {
 }
 
 /**
- * Routes a request: routes with allowed MCP tools run the tool loop (always through Chat
- * Completions internally), everything else keeps the plain passthrough/failover path.
+ * Routes a request: routes with gateway tools (allowed MCP tools or built-in tools) run the tool
+ * loop (always through Chat Completions internally), everything else keeps the plain
+ * passthrough/failover path.
  */
 export async function proxyLlmRequest(input: LlmProxyInput): Promise<Response> {
-  if (input.route.mcpTools.length > 0) return proxyMcpRequest(input);
+  const tools =
+    input.gatewayTools ?? routeGatewayTools({ mcpTools: input.route.mcpTools, builtinTools: [] });
+  if (tools.length > 0) return proxyMcpRequest(input, tools);
   return proxyPlainRequest(input);
 }
 
@@ -647,19 +660,25 @@ function injectPendingMessages(messages: unknown[], pending: unknown[]): unknown
   return [...messages.slice(0, insertAt), ...pending, ...messages.slice(insertAt)];
 }
 
-/** Merges the route's allowed MCP tools into the client's tools without duplicate names. */
-export function mergeMcpTools(
-  clientTools: unknown,
-  mcpTools: ResolvedRoute["mcpTools"],
-): unknown[] {
-  const tools = Array.isArray(clientTools) ? [...clientTools] : [];
+/** Names of the function tools the client sent (Chat Completions or Responses shape). */
+export function clientToolNames(clientTools: unknown): Set<string> {
   const names = new Set<string>();
-  for (const raw of tools) {
+  for (const raw of Array.isArray(clientTools) ? clientTools : []) {
     if (!isChatJson(raw)) continue;
     const fn = isChatJson(raw.function) ? raw.function : undefined;
     const name = typeof raw.name === "string" ? raw.name : fn?.name;
     if (typeof name === "string") names.add(name);
   }
+  return names;
+}
+
+/** Merges the gateway tools (MCP and built-in) into the client's tools without duplicate names. */
+export function mergeMcpTools(
+  clientTools: unknown,
+  mcpTools: Pick<GatewayTool, "exposedName" | "description" | "inputSchema">[],
+): unknown[] {
+  const tools = Array.isArray(clientTools) ? [...clientTools] : [];
+  const names = clientToolNames(tools);
   for (const tool of mcpTools) {
     if (names.has(tool.exposedName)) continue;
     const parameters =
@@ -693,7 +712,7 @@ function addUsage(
 }
 
 function toolErrorText(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown MCP error";
+  return error instanceof Error ? error.message : "Unknown tool error";
 }
 
 interface ExecutedMcpRound {
@@ -702,11 +721,11 @@ interface ExecutedMcpRound {
   items: McpTranscriptItem[];
 }
 
-/** Runs every MCP call in one model reply, recording transcript items and the messages to append. */
+/** Runs every gateway call in one model reply, recording transcript items and the messages to append. */
 async function executeMcpCalls(
   calls: CapturedToolCall[],
   text: string,
-  tools: ResolvedRoute["mcpTools"],
+  tools: GatewayTool[],
 ): Promise<ExecutedMcpRound> {
   const byName = new Map(tools.map((tool) => [tool.exposedName, tool]));
   const assistantCalls: unknown[] = [];
@@ -721,8 +740,10 @@ async function executeMcpCalls(
     const started = performance.now();
     let content = "";
     let isError = false;
+    const source = tool?.source ?? "mcp";
     items.push({
       kind: "tool_call",
+      source,
       toolCallId: id,
       toolName: name,
       toolArgs: args,
@@ -733,7 +754,7 @@ async function executeMcpCalls(
       isError = true;
     } else {
       try {
-        const result = await callMcpTool(tool.server, tool.toolName, args);
+        const result = await tool.call(args);
         content = result.text || "(empty result)";
         isError = result.isError;
       } catch (error) {
@@ -744,6 +765,7 @@ async function executeMcpCalls(
     const durationMs = Math.round(performance.now() - started);
     items.push({
       kind: "tool_result",
+      source,
       toolCallId: id,
       toolName: name,
       content,
@@ -899,12 +921,13 @@ export function responsesStreamFrames(
 }
 
 /**
- * Plain-chat MCP loop: merges allowed tools, executes MCP calls, appends their results and calls
- * upstream again (max four rounds, last with `tool_choice: "none"`). Only the final reply reaches
- * the client. Mixed replies execute the MCP calls, return only client calls and store the MCP
- * messages for re-injection on the client's next request.
+ * Plain-chat gateway tool loop (MCP and built-in tools): merges the tools, executes gateway calls,
+ * appends their results and calls upstream again (max four rounds, last with
+ * `tool_choice: "none"`). Only the final reply reaches the client. Mixed replies execute the
+ * gateway calls, return only client calls and store the gateway messages for re-injection on the
+ * client's next request.
  */
-async function proxyMcpRequest(input: LlmProxyInput): Promise<Response> {
+async function proxyMcpRequest(input: LlmProxyInput, routeTools: GatewayTool[]): Promise<Response> {
   const breaker = input.breaker ?? circuitBreaker;
   const fetchImpl = input.fetchImpl ?? fetch;
   const startedAt = new Date();
@@ -929,7 +952,7 @@ async function proxyMcpRequest(input: LlmProxyInput): Promise<Response> {
 
   const base = input.clientApi === "chat" ? input.body : input.chatBody;
   if (!base || !Array.isArray(base.messages)) {
-    const message = "Route has MCP tools but the request has no chat messages to forward.";
+    const message = "Route has gateway tools but the request has no chat messages to forward.";
     finish({
       status: "error",
       httpStatus: 500,
@@ -948,8 +971,11 @@ async function proxyMcpRequest(input: LlmProxyInput): Promise<Response> {
     const pending = await takePendingMcpMessages(input.sessionId, toolCallIdsIn(messages));
     messages = injectPendingMessages(messages, pending);
   }
-  const mergedTools = mergeMcpTools(roundChat.tools, input.route.mcpTools);
-  const toolByName = new Map(input.route.mcpTools.map((tool) => [tool.exposedName, tool]));
+  // A client tool with the same name wins: the gateway never executes a call the client declared.
+  const clientNames = clientToolNames(roundChat.tools);
+  const gatewayTools = routeTools.filter((tool) => !clientNames.has(tool.exposedName));
+  const mergedTools = mergeMcpTools(roundChat.tools, gatewayTools);
+  const toolByName = new Map(gatewayTools.map((tool) => [tool.exposedName, tool]));
 
   let usageTotal: TokenUsage | undefined;
 
@@ -1142,7 +1168,7 @@ async function proxyMcpRequest(input: LlmProxyInput): Promise<Response> {
       return respond(stripped, result.step, result.step.provider.name);
     }
 
-    const executed = await executeMcpCalls(mcpCalls, captured.text, input.route.mcpTools);
+    const executed = await executeMcpCalls(mcpCalls, captured.text, gatewayTools);
     mcpItems.push(...executed.items);
 
     if (clientCalls.length > 0) {
