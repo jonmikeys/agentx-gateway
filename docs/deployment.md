@@ -82,8 +82,8 @@ Always pass `--profile tls` on later commands too (`docker compose --profile tls
 ## Using the published image
 
 Tagged releases (`v*`) are published to the GitHub Container Registry as
-`ghcr.io/jonmikeys/agentx-gateway` with the tags `<version>` (for example `0.1.0`),
-`<major>.<minor>` (`0.1`) and `latest`. Pin a version in production rather than `latest`.
+`ghcr.io/jonmikeys/agentx-gateway` with the tags `<version>` (for example `0.2.0`),
+`<major>.<minor>` (`0.2`) and `latest`. Pin a version in production rather than `latest`.
 
 `docker-compose.yml` builds locally by default. To run the published image instead, add a
 `docker-compose.override.yml` next to it (Compose loads it automatically). `build: !reset null`
@@ -92,7 +92,7 @@ drops the local build and needs Compose 2.24 or newer:
 ```yaml
 services:
   app:
-    image: ghcr.io/jonmikeys/agentx-gateway:0.1.0
+    image: ghcr.io/jonmikeys/agentx-gateway:0.2.0
     build: !reset null
     pull_policy: always
 ```

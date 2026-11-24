@@ -5,7 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - unreleased
+## [0.2.0] - 2026-11-24
+
+### Added
+
+- `POST /v1/sessions/{id}/end`: a client can end its own session, for example when the user
+  returns to a menu. It uses the client API key, only ends sessions owned by that key
+  (`end_reason = client`) and always answers `204 No Content` (unknown, expired, already ended
+  and other-key ids are silent no-ops), so it is idempotent and cannot probe ids. The next chat
+  request with that id gets `404 session_not_found`. Documented in `GET /v1/openapi.json` and
+  [`docs/sessions-and-transcripts.md`](docs/sessions-and-transcripts.md). Clients are not
+  required to call it: idle sessions still expire on their own.
+
+## [0.1.0] - 2026-11-23
 
 First release.
 
@@ -108,4 +120,5 @@ First release.
 - Release workflow: pushing a `v*` tag builds the Docker image and publishes it to
   `ghcr.io/jonmikeys/agentx-gateway` with the `<version>`, `<major>.<minor>` and `latest` tags.
 
+[0.2.0]: https://github.com/jonmikeys/agentx-gateway/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jonmikeys/agentx-gateway/releases/tag/v0.1.0
