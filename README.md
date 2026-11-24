@@ -4,7 +4,7 @@ Self-hostable, OpenAI-compatible API gateway and admin CRM for the AGENTX avatar
 application: session and transcript tracking, media and camera catalogues, MCP server
 registry, multi-provider failover, and visual agent chatflows built on LangGraph.js.
 
-Status: v0.1.0 (first release). Everything in the [spec](docs/spec.md) for this version is
+Status: v0.2.0. Everything in the [spec](docs/spec.md) for this version is
 implemented: the client API, routing and failover, sessions, the Responses API, media and
 cameras, MCP, agents with subflows and client tools, the admin CRM, and the Docker deployment.
 See the [CHANGELOG](CHANGELOG.md).

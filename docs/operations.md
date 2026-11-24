@@ -132,7 +132,7 @@ long-running host.
 
 ## Health checks
 
-`GET /health` needs no authentication and returns `{"ok":true,"db":true,"version":"0.1.0"}`
+`GET /health` needs no authentication and returns `{"ok":true,"db":true,"version":"0.2.0"}`
 with `200`, or `{"ok":false,"db":false,...}` with `503` when Postgres is unreachable. The
 container `HEALTHCHECK` calls it every 30 seconds, so `docker compose ps` shows `healthy` or
 `unhealthy`. Point an external uptime monitor at `/health` on the public URL. The endpoint
