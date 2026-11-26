@@ -86,6 +86,7 @@ const route: ResolvedRoute = {
     },
   ],
   mcpTools: [],
+  builtinTools: [],
 };
 
 function fetchCompletion(text: string): typeof fetch {

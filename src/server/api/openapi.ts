@@ -54,7 +54,11 @@ const agentSchema = z.object({
 });
 
 const mediaSchema = z.object({
-  id: z.string(),
+  id: z
+    .string()
+    .describe(
+      "`med_…` for catalogue items; `wm_…` for temporary items found by the gateway's image_search / video_search tools during a session.",
+    ),
   name: z.string(),
   description: z.string(),
   kind: z.enum(["image", "video"]),
@@ -62,7 +66,7 @@ const mediaSchema = z.object({
   content_url: z
     .string()
     .describe(
-      "Absolute URL of the file: `/v1/media/{id}/content` for uploads, or the external URL as stored.",
+      "Absolute URL of the file: `/v1/media/{id}/content` for uploads and temporary web items (streamed through the gateway), or the external URL as stored.",
     ),
   mime_type: z.string(),
 });
@@ -307,6 +311,7 @@ export const DOCUMENTED_ERRORS = {
     "api_error",
   ),
   agentRunFailed: err("agent_run_failed", "The agent run failed.", "api_error"),
+  mediaUnavailable: err("media_unavailable", "The image source answered HTTP 403.", "api_error"),
 } satisfies Record<string, ErrorCode>;
 
 const E = DOCUMENTED_ERRORS;
@@ -517,12 +522,29 @@ function buildPaths(): JsonObject {
       "MediaList",
       "Media",
     ),
+    "/v1/media/{id}": {
+      get: {
+        tags: ["Media"],
+        summary: "Get one media item",
+        description:
+          "One item in the same shape as `/v1/media` entries. Works for enabled catalogue items and for the caller's temporary web items (`wm_…`), which only the API key whose session found them can see while that session is active.",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "OK", content: json("MediaItem") },
+          ...AUTH_ERRORS,
+          "404": errorResponse(
+            "Unknown or disabled item, or a temporary item of another key or an ended session.",
+            [E.mediaNotFound],
+          ),
+        },
+      },
+    },
     "/v1/media/{id}/content": {
       get: {
         tags: ["Media"],
         summary: "Download media content",
         description:
-          "Serves an uploaded file with HTTP Range, ETag and Last-Modified support. External-URL items redirect (302).",
+          "Serves an uploaded file with HTTP Range, ETag and Last-Modified support. External-URL items redirect (302). Temporary web items (`wm_…`) are streamed through from their source with `Range` forwarded and nothing stored; videos are resolved to a direct MP4 on the first request. A source that fails answers 502 `media_unavailable`.",
         parameters: [
           { name: "id", in: "path", required: true, schema: { type: "string" } },
           {
@@ -543,6 +565,9 @@ function buildPaths(): JsonObject {
             E.mediaNotFound,
           ]),
           "416": { description: "Range not satisfiable." },
+          "502": errorResponse("A temporary web item's source failed or its link expired.", [
+            E.mediaUnavailable,
+          ]),
         },
       },
     },

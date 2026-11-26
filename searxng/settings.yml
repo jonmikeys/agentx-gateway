@@ -1,0 +1,26 @@
+# SearXNG settings for the AGENTX Gateway `search` compose profile (docs/web-search.md).
+# Only the values that differ from SearXNG's defaults are listed here.
+use_default_settings: true
+
+general:
+  instance_name: "AGENTX search"
+
+server:
+  # Overridden by the SEARXNG_SECRET environment variable (set in .env).
+  secret_key: "change-me-via-SEARXNG_SECRET"
+  # Reachable only from the internal compose network, so no rate limiter (it needs Valkey).
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  # The gateway reads results as JSON; html stays for debugging with a browser.
+  formats:
+    - html
+    - json
+  # The gateway sends `safesearch` on every query (SEARCH_SAFESEARCH); this is the fallback.
+  safe_search: 1
+  autocomplete: ""
+
+ui:
+  static_use_hash: true

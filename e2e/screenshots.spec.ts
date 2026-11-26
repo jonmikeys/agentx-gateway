@@ -10,6 +10,7 @@ import dagre from "dagre";
 import postgres from "postgres";
 import { navGroups } from "../src/components/app-shell/nav";
 import { type MockMcp, startMockMcp } from "../tests/support/mock-mcp";
+import { type MockSearxng, startMockSearxng } from "../tests/support/mock-searxng";
 import { type MockUpstream, startMockUpstream } from "../tests/support/mock-upstream";
 import { type MockWebhook, startMockWebhook } from "../tests/support/mock-webhook";
 import { type MediaSeed, seedMediaAndCameras } from "./media-seed";
@@ -36,6 +37,8 @@ const MOCK_MJPEG_PORT = Number(process.env.MOCK_MJPEG_PORT ?? 4020);
 const MOCK_VIDEO_PORT = Number(process.env.MOCK_VIDEO_PORT ?? 4030);
 const MOCK_MCP_PORT = Number(process.env.MOCK_MCP_PORT ?? 4312);
 const MOCK_WEBHOOK_PORT = Number(process.env.MOCK_WEBHOOK_PORT ?? 4513);
+// Must match the SEARXNG_URL of the gateway under capture (the built-in web_search demo).
+const MOCK_SEARXNG_PORT = Number(process.env.MOCK_SEARXNG_PORT ?? 4931);
 // The one-time key shown in the "API key created" capture. Fixed so reruns are identical.
 const DEMO_API_KEY = `agx_${"x".repeat(32)}`;
 const themes = ["light", "dark"] as const;
@@ -49,6 +52,7 @@ const captured: Captured[] = [];
 let upstream: MockUpstream;
 let mcp: MockMcp;
 let webhook: MockWebhook;
+let searxng: MockSearxng;
 let mediaSeed: MediaSeed;
 let admin: APIRequestContext;
 let gateway: APIRequestContext;
@@ -56,6 +60,7 @@ const demo = {
   reasoningSession: "",
   toolSession: "",
   mcpSession: "",
+  searchSession: "",
   endedSession: "",
   failoverSession: "",
   responsesSession: "",
@@ -149,6 +154,7 @@ async function seedDemoData(): Promise<string> {
     description: string;
     steps: [string, string][];
     mcp?: boolean;
+    builtin?: string[];
   }[] = [
     {
       slug: "avatar-default",
@@ -157,6 +163,7 @@ async function seedDemoData(): Promise<string> {
         ["OpenAI", "ok"],
         ["DeepSeek", "mock-model"],
       ],
+      builtin: ["web_search", "read_web_page", "image_search"],
     },
     {
       slug: "avatar-reasoning",
@@ -197,6 +204,12 @@ async function seedDemoData(): Promise<string> {
       steps: [["OpenAI", "mcp-multi"]],
       mcp: true,
     },
+    {
+      slug: "avatar-search",
+      description: "Model that searches the web with the built-in web_search tool",
+      steps: [["OpenAI", "gateway-tool"]],
+      builtin: ["web_search"],
+    },
   ];
   const existingRoutes = (await existing("routes")) as unknown as {
     id: string;
@@ -213,14 +226,15 @@ async function seedDemoData(): Promise<string> {
     }));
     const found = existingRoutes.find((entry) => entry.slug === route.slug);
     if (found) {
-      if (!route.mcp) continue;
+      if (!route.mcp && !route.builtin) continue;
       const response = await admin.put(`/api/admin/routes/${found.id}`, {
         data: {
           slug: found.slug,
           description: found.description,
           enabled: found.enabled,
           steps: found.steps,
-          mcp_tool_ids: mcpToolIds,
+          mcp_tool_ids: route.mcp ? mcpToolIds : [],
+          builtin_tools: route.builtin ?? [],
         },
       });
       expect(response.status()).toBe(200);
@@ -232,6 +246,7 @@ async function seedDemoData(): Promise<string> {
         description: route.description,
         steps: stepPayload,
         ...(route.mcp ? { mcp_tool_ids: mcpToolIds } : {}),
+        ...(route.builtin ? { builtin_tools: route.builtin } : {}),
       },
     });
     expect(response.status()).toBe(201);
@@ -800,6 +815,17 @@ async function seedSessions() {
     await waitForRequests(mcpResult.id, 1);
     demo.mcpSession = mcpResult.id;
 
+    // 2c. Built-in tool: the gateway runs web_search itself (mock SearXNG) and answers.
+    const searchResult = await converse("avatar-search", [
+      SYSTEM_PROMPT,
+      {
+        role: "user",
+        content: JSON.stringify({ tool: "web_search", args: { query: "red panda" } }),
+      },
+    ]);
+    await waitForRequests(searchResult.id, 1);
+    demo.searchSession = searchResult.id;
+
     // 3. Ended by an admin after two turns.
     const endedHistory: Message[] = [
       SYSTEM_PROMPT,
@@ -899,10 +925,11 @@ test.beforeAll(async () => {
   mkdirSync(outputDir, { recursive: true });
   upstream = await startMockUpstream({
     port: MOCK_PORT,
-    models: ["ok", "mock-model", "gpt-demo"],
+    models: ["ok", "mock-model", "gpt-demo", "gateway-tool"],
   });
   mcp = await startMockMcp({ port: MOCK_MCP_PORT, slowMs: 500 });
   webhook = await startMockWebhook({ port: MOCK_WEBHOOK_PORT });
+  searxng = await startMockSearxng({ port: MOCK_SEARXNG_PORT });
   admin = await playwrightRequest.newContext({
     baseURL,
     httpCredentials: { username, password },
@@ -925,6 +952,7 @@ test.afterAll(async () => {
   await upstream.close();
   await mcp.close();
   await webhook.close();
+  await searxng.close();
   await mediaSeed.close();
   const lines = [
     "# CRM screenshots",
@@ -1101,6 +1129,23 @@ for (const theme of themes) {
         "state-route-editor",
         "Model Routes: editor with two ordered failover steps (drag handle and arrow buttons)",
         false,
+      );
+    });
+
+    test("state: route editor built-in tools", async ({ page }) => {
+      await page.goto("/routes");
+      await settle(page);
+      await page.getByRole("button", { name: "Edit avatar-default" }).click();
+      const heading = page.getByRole("heading", { name: "Built-in tools" });
+      await expect(heading).toBeVisible();
+      await settleDialog(page);
+      await heading.scrollIntoViewIfNeeded();
+      await save(
+        page,
+        "state-route-editor-builtin-tools",
+        "Model Routes: the Built-in tools section with one checkbox per gateway tool (web_search, read_web_page and image_search ticked; video_search needs yt-dlp)",
+        false,
+        true,
       );
     });
 
@@ -1472,6 +1517,23 @@ for (const theme of themes) {
         page,
         "state-session-mcp-tools",
         "Session transcript: gateway-executed MCP tool calls with the MCP badge, arguments, nested results and duration",
+        false,
+        true,
+      );
+    });
+
+    test("state: session with a built-in web_search call", async ({ page }) => {
+      await page.goto(`/sessions/${demo.searchSession}`);
+      await expect(page.getByText("web_search").first()).toBeVisible();
+      await expect(
+        page.locator('[data-slot="badge"]').filter({ hasText: "Built-in" }).first(),
+      ).toBeVisible();
+      await settle(page);
+      await page.getByText("web_search").first().scrollIntoViewIfNeeded();
+      await save(
+        page,
+        "state-session-builtin-tool",
+        "Session transcript: a gateway-run built-in web_search call with the Built-in badge, arguments and nested results",
         false,
         true,
       );

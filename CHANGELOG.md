@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Web search (issue #23): an opt-in `search` compose profile runs SearXNG on the internal
+  network, and `SEARXNG_URL` / `SEARCH_SAFESEARCH` configure it. Built-in gateway tools run in
+  the plain-chat tool loop beside MCP tools, ticked per route and off by default: `web_search`,
+  `read_web_page` (Readability, 8000 characters per call with `offset`), `image_search` and
+  `video_search`.
+- Temporary web media items (`wm_…`), scoped to a session and its API key and deleted when the
+  session ends or expires. `GET /v1/media/{id}` looks up catalogue and temporary items, and their
+  `content_url` streams the bytes through the gateway with `Range` forwarded. Videos (YouTube
+  only) are resolved lazily by a pinned yt-dlp bundled in the image (best single MP4 with sound,
+  at most 720p).
+- Public-address-only outbound fetching for pages and media: connect-time DNS checks, and a
+  re-check on every redirect.
+- Route editor checkboxes for built-in tools; `GET /api/admin/builtin-tools`; a Built-in badge
+  in the transcript viewer.
+
 ## [0.2.0] - 2026-11-24
 
 ### Added

@@ -3,6 +3,7 @@ import { getDb } from "@/server/db/client";
 import { sessions } from "@/server/db/schema";
 import { logger } from "@/server/logger";
 import { getSessionSettings } from "@/server/services/session-settings";
+import { deleteWebMediaForSessions } from "@/server/services/web-media";
 
 /**
  * Cleanup callback for data keyed by session id that lives outside the cascading tables
@@ -60,6 +61,7 @@ export async function expireIdleSessions(now = new Date()): Promise<number> {
     .set({ status: "expired", endReason: "idle", endedAt: now })
     .where(and(eq(sessions.status, "active"), lt(sessions.lastActivityAt, cutoff)))
     .returning({ id: sessions.id });
+  await deleteWebMediaForSessions(rows.map((row) => row.id));
   return rows.length;
 }
 

@@ -67,7 +67,8 @@ one-byte ranged `GET` when a server refuses `HEAD`), with a 10 s timeout and at 
 checks the content type against the table above and the size (when the server reports one) against
 the limit. Failures are reported in the dialog (`external_url_unreachable`, `unsupported_media_type`,
 `media_too_large`). Nothing is rechecked later: a link that goes dead stays in the catalogue.
-YouTube pages and S3 buckets are out of scope. The check runs from the gateway host, so only add URLs
+YouTube pages and S3 buckets are out of scope for the catalogue (videos found by `video_search`
+are resolved with yt-dlp instead, see [web-search.md](web-search.md)). The check runs from the gateway host, so only add URLs
 you trust.
 
 ## Client API
@@ -78,11 +79,16 @@ All routes need the usual `Authorization: Bearer <key>`.
   for enabled items. `content_url` is absolute: `PUBLIC_BASE_URL`, else the forwarded host
   (`X-Forwarded-Host`/`-Proto`), else the request origin, plus `/v1/media/{id}/content`. For external
   items it is the external URL itself.
+- `GET /v1/media/{id}` returns one item in the same shape: an enabled catalogue item, or a
+  temporary web item (`wm_…`) found by the built-in `image_search` / `video_search` tools in the
+  caller's active session. Anything else is `404 media_not_found`. See
+  [web-search.md](web-search.md#temporary-media-items).
 - `GET /v1/media/{id}/content` streams an upload with `Accept-Ranges: bytes`, a single `Range`
   (`bytes=a-b`, `a-`, `-n`) answered `206` with `Content-Range`, `416` (with `Content-Range: bytes */size`)
   for an unsatisfiable range, `ETag` (and `304`), `If-Range`, and `Cache-Control: private, max-age=3600`.
   Several ranges, other units or malformed values are ignored and the whole file is sent. External
-  items answer `302` to their URL. Unknown or disabled ids answer `404` with code `media_not_found`
+  items answer `302` to their URL. Temporary web items are streamed through from their source
+  with `Range` forwarded (nothing stored); a failing source answers `502 media_unavailable`. Unknown or disabled ids answer `404` with code `media_not_found`
   (never `session_not_found`).
 - `GET /v1/cameras` returns `{"object":"list","data":[...]}` of enabled cameras in sort order:
   `{id,name,description,type, url?, credentials?}`.

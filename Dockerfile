@@ -30,6 +30,17 @@ ENV NODE_ENV=production \
 RUN addgroup -S -g 1001 gateway && adduser -S -u 1001 -G gateway gateway \
     && mkdir -p /data/media && chown -R gateway:gateway /data
 
+# yt-dlp resolves video_search results to direct MP4 streams (docs/web-search.md). Pinned and
+# updated only with gateway releases; it uses this image's Node as its JavaScript runtime.
+ARG YT_DLP_VERSION=2026.11.23
+ARG YT_DLP_EJS_VERSION=0.8.0
+RUN apk add --no-cache python3 ca-certificates \
+    && python3 -m venv /opt/yt-dlp \
+    && /opt/yt-dlp/bin/pip install --no-cache-dir --disable-pip-version-check \
+       "yt-dlp==${YT_DLP_VERSION}" "yt-dlp-ejs==${YT_DLP_EJS_VERSION}" \
+    && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
+    && yt-dlp --version
+
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

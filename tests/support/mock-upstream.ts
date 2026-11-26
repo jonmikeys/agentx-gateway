@@ -16,6 +16,8 @@ import { handleResponses } from "./mock-responses";
  *   think-tags       streams the thinking inside <think>...</think> tags split across chunks
  *   tool-call        asks for the client tool `show_image`; after a tool result it answers in text
  *   echo             answers "Echo: <last user message>" (for search and redaction tests)
+ *   gateway-tool     the last user message is JSON `{"tool": name, "args": {...}}`: calls that
+ *                    tool once, then answers "Result: <tool result>" (built-in tool tests)
  * `POST /responses` (native Responses API, see mock-responses.ts) supports the same switches.
  * Self-contained (no `@/` imports) so Playwright and tsx can run it.
  */
@@ -152,6 +154,23 @@ function scriptedDeltas(
       ];
     case "echo":
       return [{ content: "Echo: " }, { content: lastUserText }];
+    case "gateway-tool": {
+      if (lastRole === "tool") return [{ content: `Result: ${toolContent}` }];
+      let spec: { tool?: string; args?: unknown } = {};
+      try {
+        spec = JSON.parse(lastUserText) as typeof spec;
+      } catch {
+        return [{ content: "Send JSON with a tool name." }];
+      }
+      return [
+        toolCallDelta(
+          0,
+          `call_gateway_${round}`,
+          String(spec.tool ?? "unknown"),
+          JSON.stringify(spec.args ?? {}),
+        ),
+      ];
+    }
     case "mcp-echo":
       if (lastRole === "tool") return [{ content: `Answer: ${toolContent}` }];
       return [

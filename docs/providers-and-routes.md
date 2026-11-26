@@ -17,7 +17,9 @@ Unity / client  ->  model: "avatar-default"   (a route slug)
 - A **model route** is the model name clients see. Its ordered **steps** each name a provider,
   the upstream model to ask for, and a timeout. A route can also select **allowed MCP tools**;
   they are merged into the client's `tools` and executed by the gateway. See
-  [mcp.md](mcp.md). `GET /v1/models` lists the enabled routes.
+  [mcp.md](mcp.md). It can also offer **built-in tools** (web search, page reading, image and
+  video search), each ticked separately and off by default; see [web-search.md](web-search.md).
+  `GET /v1/models` lists the enabled routes.
 - Exactly one route is the **default**. The first route you create becomes the default; change it
   with the star button on the Model Routes page or `POST /api/admin/routes/{id}/default`.
   The default route cannot be disabled or deleted while other routes exist.
@@ -138,7 +140,8 @@ All under `/api/admin` (Basic auth), JSON, Zod-validated:
 |---|---|
 | `GET/POST /providers`, `GET/PATCH/DELETE /providers/{id}` | CRUD. On update an absent `api_key` / `extra_headers` keeps the stored value; `null` clears it. Delete is blocked with `409 provider_in_use` (and the route slugs) while a route uses the provider |
 | `POST /providers/{id}/test` | `GET {base_url}/models` with a 5 s timeout; returns `ok`, `latency_ms`, `model_count`, `models`, `error` |
-| `GET/POST /routes`, `GET/PUT/DELETE /routes/{id}` | CRUD; `PUT` replaces the ordered `steps` array and the `mcp_tool_ids` selection |
+| `GET/POST /routes`, `GET/PUT/DELETE /routes/{id}` | CRUD; `PUT` replaces the ordered `steps` array, the `mcp_tool_ids` selection and the `builtin_tools` names |
+| `GET /builtin-tools` | Built-in tools with `available` / `unavailable_reason` for this deployment |
 | `POST /routes/{id}/default` | Make a route the default |
 
 For API keys see [api-keys.md](api-keys.md); for MCP servers and tools see [mcp.md](mcp.md).

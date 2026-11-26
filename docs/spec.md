@@ -79,6 +79,9 @@ unknown, Vite/UnoCSS). No code is copied from it.
 | `MEDIA_STORAGE_DIR` | no | Upload storage directory (default `/data/media`) |
 | `LOG_LEVEL` | no | `info` default |
 | `GATEWAY_DOMAIN` | no | Domain for the Caddy TLS profile |
+| `SEARXNG_URL` | no | SearXNG base URL; the built-in web search tools exist only when set (§12a) |
+| `SEARCH_SAFESEARCH` | no | `0`/`1`/`2`, default `1`; sent on every query, never chosen by the model |
+| `YTDLP_PATH` | no | yt-dlp executable for video playback (bundled in the image) |
 
 `.env.example` lists every variable with empty values. Startup validates required
 variables and reports missing names without values.
@@ -95,7 +98,8 @@ Base: `{PUBLIC_BASE_URL}/v1`. Unity's base URL includes `/v1` and builds
 | `GET /v1/models` | model routes + `agent:<id>` entries. Never requires `X-Session-Id` |
 | `GET /v1/agents` (alias `GET /agents`) | `{"object":"list","data":[{"id","object":"agent","name","description","created"}]}` — published, enabled agents only |
 | `GET /v1/media` | media catalogue (enabled items) |
-| `GET /v1/media/{id}/content` | file serving with HTTP Range support |
+| `GET /v1/media/{id}` | one item in the `/v1/media` shape: catalogue items and the caller's temporary web items (`wm_…`, §12a) |
+| `GET /v1/media/{id}/content` | file serving with HTTP Range support; temporary web items are streamed through from their source |
 | `GET /v1/cameras` | camera catalogue (enabled items) |
 | `GET /health` | `{"ok":true,"db":true,"version":"…"}`; 503 when DB is down |
 | `GET /v1/openapi.json` | OpenAPI 3.1 document of this API; unauthenticated. `/docs` renders it (Scalar) behind admin auth |
@@ -117,7 +121,8 @@ Base: `{PUBLIC_BASE_URL}/v1`. Unity's base URL includes `/v1` and builds
   upstreams only (OpenAI, Azure OpenAI, DeepSeek, Groq, OpenRouter, Together, Mistral,
   Ollama, vLLM, LM Studio, Anthropic/Gemini via their OpenAI-compatible endpoints).
 - **Model route**: slug (e.g. `avatar-default`), description, ordered steps
-  `(provider, upstream model, timeout_ms)`, allowed MCP tools (§12).
+  `(provider, upstream model, timeout_ms)`, allowed MCP tools (§12), built-in tools (§12a,
+  off by default).
 - Client `model` = route slug. `GET /v1/models` lists routes.
 - Failover triggers: connection error, timeout, HTTP 408, 429, 5xx. Not other 4xx.
 - Failover only **before the first streamed token** is sent to the client. After that an
@@ -190,6 +195,31 @@ authenticated client.
   client calls, persist MCP call/result messages per session keyed by `tool_call_id`, and
   re-inject them when the client sends its tool results.
 - Every MCP call is logged in the transcript (tool, args, result, duration, error).
+
+## 12a. Web search (built-in tools)
+
+Details: [web-search.md](web-search.md).
+
+- Backend: self-hosted **SearXNG** (compose profile `search`, internal network only, `json` in
+  `search.formats`). `SEARXNG_URL` turns the tools on; `SEARCH_SAFESEARCH` (default `1`) is sent
+  on every query and the model can never override it.
+- **Built-in tools, not MCP**: a small provider beside MCP in the plain-chat loop (merged into the
+  client's tools, executed by the gateway, max 4 rounds, never exposed to the client). Each route
+  ticks them individually, **off by default**. Plain-chat routes only (agents: issue #24).
+- `web_search` (general; title, URL, snippet; top 5, up to 10); `read_web_page` (plain fetch +
+  Mozilla Readability via jsdom, 2 MB, 10 s, at most 8000 characters with `offset`, no headless
+  browser); `image_search` / `video_search` (temporary media items with ids).
+- Every outbound fetch is public-address only (http/https; no loopback, private, link-local or
+  CGNAT; checked at connect time and on every redirect hop).
+- **Temporary items** (`web_media_items`, `wm_…`): session- and API-key-scoped, deleted when the
+  session ends or expires. `GET /v1/media/{id}` resolves them like catalogue items.
+- **Delivery = streaming proxy**: `content_url` points at the gateway, which streams the bytes
+  with Range forwarded and stores nothing. Images fall back to the search thumbnail.
+- **Videos: YouTube only, via yt-dlp**, bundled in the image at a pinned version, using the
+  image's Node as its JavaScript runtime. `video_search` keeps YouTube results only and stores
+  the canonical watch URL. Resolved lazily on first playback and cached on the row; best single MP4
+  with audio and video at most 720p, no merging, no length limit. Unplayable results surface as
+  `502 media_unavailable` when shown; an expired link simply fails.
 
 ## 13. Agents (chatflows)
 
@@ -283,11 +313,11 @@ Administration         API Keys, Settings
   errors, slowest providers.
 - **Sessions**: table with filters, full-text transcript search, bulk export/delete.
 - **Transcript viewer**: chat timeline; collapsible thinking blocks; tool-call cards
-  (name, args, result, duration; Unity/MCP badge); per-turn metadata (provider, failovers,
+  (name, args, result, duration; Unity/MCP/Built-in badge); per-turn metadata (provider, failovers,
   latency, tokens); agent run trace; session memory/vars; End / Delete / Export; live
   updates for active sessions.
 - **Providers**: CRUD, test connection, health and circuit-breaker state.
-- **Model Routes**: drag-to-reorder steps, allowed MCP tools.
+- **Model Routes**: drag-to-reorder steps, built-in tool checkboxes, allowed MCP tools.
 - **Media / Cameras**: CRUD, thumbnails/preview.
 - **MCP Servers**: register, test, browse tools, allowlist.
 - **API Keys**: create (shown once), label, IP allowlist, rate limits, revoke, last used.

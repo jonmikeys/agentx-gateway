@@ -5,8 +5,11 @@ import type { ClientEnv } from "@/server/gateway/client-auth";
 import { resolvePublicBaseUrl } from "@/server/media/public-url";
 import { serveMedia } from "@/server/media/serve";
 import { getMediaStorage } from "@/server/media/storage";
+import { serveWebMedia } from "@/server/media/web-proxy";
 import { listEnabledCameras, toCameraCatalogueEntry } from "@/server/services/cameras";
 import { findMedia, listEnabledMedia, toCatalogueEntry } from "@/server/services/media";
+import { findOwnedWebMedia, isWebMediaId, toWebMediaEntry } from "@/server/services/web-media";
+import { resolveVideoStream } from "@/server/tools/builtin/video-resolver";
 
 /** Registers the authenticated media and camera catalogue routes (`/v1/media`, `/v1/cameras`). */
 export function registerMediaRoutes(app: Hono<ClientEnv>): void {
@@ -16,8 +19,30 @@ export function registerMediaRoutes(app: Hono<ClientEnv>): void {
     return c.json({ object: "list", data: rows.map((row) => toCatalogueEntry(row, baseUrl)) });
   });
 
+  // One item by id: catalogue items and the caller's temporary web items (`wm_…`), same shape.
+  app.get("/v1/media/:id", async (c) => {
+    const id = c.req.param("id");
+    const baseUrl = resolvePublicBaseUrl(c.req.url, c.req.raw.headers, getEnv().PUBLIC_BASE_URL);
+    if (isWebMediaId(id)) {
+      const item = await findOwnedWebMedia(id, c.get("apiKey").id);
+      if (!item) return openAIError(404, "media_not_found", `No media item ${id}.`);
+      c.header("Cache-Control", "no-store");
+      return c.json(toWebMediaEntry(item, baseUrl));
+    }
+    const row = await findMedia(id);
+    if (!row?.enabled) return openAIError(404, "media_not_found", `No media item ${id}.`);
+    return c.json(toCatalogueEntry(row, baseUrl));
+  });
+
   app.get("/v1/media/:id/content", async (c) => {
-    const row = await findMedia(c.req.param("id"));
+    const id = c.req.param("id");
+    if (isWebMediaId(id)) {
+      // Only the owning API key's active session may stream it; anything else looks unknown.
+      const item = await findOwnedWebMedia(id, c.get("apiKey").id);
+      if (!item) return openAIError(404, "media_not_found", `No media item ${id}.`);
+      return serveWebMedia(c.req.raw, item, { resolveVideo: resolveVideoStream });
+    }
+    const row = await findMedia(id);
     // Disabled items are invisible to clients, exactly like unknown ids. The code is
     // `media_not_found` (never `session_not_found`, which Unity treats as session expiry).
     if (!row?.enabled) {

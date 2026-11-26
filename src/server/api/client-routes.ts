@@ -4,7 +4,9 @@ import { chatCompletionRequestSchema, responsesRequestSchema } from "@/lib/gatew
 import { type RunAgentResult, runAgent } from "@/server/agents/runtime";
 import { openAIError } from "@/server/api/errors";
 import type { LlmApi, TokenUsage } from "@/server/db/schema";
+import { getEnv } from "@/server/env";
 import { type ClientEnv, recordTokenUsage } from "@/server/gateway/client-auth";
+import { routeGatewayTools, routeHasGatewayTools } from "@/server/gateway/gateway-tools";
 import {
   proxyLlmRequest,
   type RequestOutcome,
@@ -27,6 +29,7 @@ import type {
   CapturedToolCall,
 } from "@/server/gateway/transcript/response-capture";
 import { logger } from "@/server/logger";
+import { resolvePublicBaseUrl } from "@/server/media/public-url";
 import {
   listPublishedAgents,
   type ResolvedAgent,
@@ -47,6 +50,7 @@ import {
   resolveSession,
   SESSION_HEADER,
 } from "@/server/services/sessions";
+import { searchSettingsFromEnv } from "@/server/tools/builtin/registry";
 
 /** Fields consumed by the gateway that must never reach the upstream provider. */
 const GATEWAY_ONLY_FIELDS = ["agent_id"];
@@ -206,6 +210,13 @@ async function runRequest(
     clientSignal: c.req.raw.signal,
     responseHeaders: { [SESSION_HEADER]: session.sessionId },
     sessionId: session.sessionId,
+    gatewayTools: routeGatewayTools(route, {
+      search: searchSettingsFromEnv(),
+      sessionId: session.sessionId,
+      apiKeyId: apiKey.id,
+      baseUrl: resolvePublicBaseUrl(c.req.url, c.req.raw.headers, getEnv().PUBLIC_BASE_URL),
+      signal: c.req.raw.signal,
+    }),
     onComplete,
   });
 }
@@ -724,10 +735,11 @@ export function registerClientRoutes(app: Hono<ClientEnv>): void {
     const { route } = resolved;
 
     try {
-      // MCP routes always call Chat Completions internally; other routes only translate when a
-      // step is not a native Responses provider. This also rejects what chat cannot express.
+      // Routes with gateway tools always call Chat Completions internally; other routes only
+      // translate when a step is not a native Responses provider. This also rejects what chat
+      // cannot express.
       const needsTranslation =
-        route.mcpTools.length > 0 ||
+        routeHasGatewayTools(route) ||
         route.steps.some((step) => upstreamApiFor("responses", step) === "chat");
       if (needsTranslation) chatBody = buildChatRequest(body, messages);
     } catch (error) {

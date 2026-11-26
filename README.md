@@ -33,6 +33,10 @@ See the [CHANGELOG](CHANGELOG.md).
   tools, and let plain chats call them. The gateway executes MCP calls, loops (max four rounds),
   keeps Unity tools client-side, and re-injects mixed-round MCP messages on the next request.
   See [docs/mcp.md](docs/mcp.md).
+- **Web search** (opt-in): a self-hosted SearXNG (compose profile `search`) powers built-in
+  tools a route can offer: `web_search`, `read_web_page`, and `image_search` / `video_search`
+  (YouTube) whose results the avatar can show. The gateway streams found media through, and
+  resolves videos with a bundled yt-dlp. See [docs/web-search.md](docs/web-search.md).
 - **Agents (chatflows)**: design agents in a React Flow editor, validate and publish numbered
   versions, and run them through LangGraph with session memory, streaming replies,
   checkpointing and a per-node run trace. `GET /v1/agents` lists live agents; requests use
@@ -155,6 +159,10 @@ Docker Compose loads `.env` automatically.
 | `MEDIA_STORAGE_DIR` | no | `/data/media` | Directory for uploaded media. A volume in Compose; use `./data/media` for local `pnpm dev` |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn` or `error` |
 | `GATEWAY_DOMAIN` | no | `localhost` in Compose | Public domain for the Caddy `tls` profile. Needed only with that profile |
+| `SEARXNG_URL` | no | none | SearXNG base URL. Turns on the built-in web search tools (`http://searxng:8080` with the `search` profile). See [web search](docs/web-search.md) |
+| `SEARCH_SAFESEARCH` | no | `1` | SearXNG safe search sent with every query: `0` off, `1` moderate, `2` strict |
+| `YTDLP_PATH` | no | `yt-dlp` | yt-dlp executable for video playback; bundled in the image, set it only for local `pnpm dev` |
+| `SEARXNG_SECRET` | Compose only | empty | Secret the `search` profile's SearXNG signs cookies with |
 | `POSTGRES_USER` | Compose only | `agentx` | Credentials for the bundled `postgres` service |
 | `POSTGRES_PASSWORD` | Compose only | `agentx` | Set a random value for anything beyond local use |
 | `POSTGRES_DB` | Compose only | `agentx` | Database name of the bundled `postgres` service |

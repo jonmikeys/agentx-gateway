@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { builtinToolNameSchema } from "@/lib/builtin-tools";
 import { isValidCidr } from "@/server/gateway/cidr";
 
 /** Zod schemas shared by the admin API and the CRM forms. */
@@ -67,6 +68,8 @@ export const routeWriteSchema = z.object({
   steps: z.array(routeStepSchema).min(1, "Add at least one step").max(10),
   /** Allowed MCP tools offered on this route. Only tools that are allowed globally are used. */
   mcp_tool_ids: z.array(z.uuid()).max(200).default([]),
+  /** Built-in gateway tools offered on this route (docs/web-search.md). Off by default. */
+  builtin_tools: z.array(builtinToolNameSchema).max(20).default([]),
 });
 
 export type RouteWriteInput = z.infer<typeof routeWriteSchema>;

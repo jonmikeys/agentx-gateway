@@ -38,6 +38,18 @@ export const envSchema = z.object({
   MEDIA_STORAGE_DIR: optionalText.transform((value) => value ?? "/data/media"),
   LOG_LEVEL: optionalText.transform((value) => value ?? "info").pipe(z.enum(logLevels)),
   GATEWAY_DOMAIN: optionalText,
+  /** SearXNG base URL; the built-in web search tools exist only when it is set (docs/web-search.md). */
+  SEARXNG_URL: optionalText.refine(
+    (value) => value === undefined || /^https?:\/\//.test(value),
+    "must be an http:// or https:// URL such as http://searxng:8080",
+  ),
+  /** SearXNG `safesearch` sent with every query: 0 off, 1 moderate (default), 2 strict. */
+  SEARCH_SAFESEARCH: optionalText
+    .transform((value) => value ?? "1")
+    .pipe(z.enum(["0", "1", "2"]))
+    .transform(Number),
+  /** yt-dlp executable for video_search playback; the Docker image bundles it on PATH. */
+  YTDLP_PATH: optionalText,
 });
 
 export type Env = z.infer<typeof envSchema>;

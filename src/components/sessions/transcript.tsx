@@ -23,6 +23,12 @@ import type {
   TurnView,
 } from "@/lib/session-types";
 
+const TOOL_SOURCE_LABELS: Record<NonNullable<TranscriptItemView["tool_source"]>, string> = {
+  client: "Unity",
+  mcp: "MCP",
+  builtin: "Built-in",
+};
+
 function prettyJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
 }
@@ -96,13 +102,14 @@ function ToolCallCard({
     (result
       ? new Date(result.created_at).getTime() - new Date(call.created_at).getTime()
       : undefined);
-  const failed = result?.tool_source === "mcp" && result.content.startsWith("Error:");
+  const gateway = result?.tool_source === "mcp" || result?.tool_source === "builtin";
+  const failed = gateway && result.content.startsWith("Error:");
   return (
     <div className="max-w-[85%] overflow-hidden rounded-lg border bg-card text-card-foreground">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <Wrench className="size-4 text-muted-foreground" />
         <span className="font-mono text-sm font-medium">{call.tool_name ?? "unknown tool"}</span>
-        <Badge variant="outline">{call.tool_source === "mcp" ? "MCP" : "Unity"}</Badge>
+        <Badge variant="outline">{TOOL_SOURCE_LABELS[call.tool_source ?? "client"]}</Badge>
         {failed && <Badge variant="destructive">Error</Badge>}
         {duration !== undefined && duration >= 0 && (
           <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">

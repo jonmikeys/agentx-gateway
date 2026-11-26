@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { adminFetch, errorMessage } from "@/lib/admin-client";
+import type { BuiltinToolView } from "@/lib/builtin-tools";
 import type { McpToolView } from "@/server/services/mcp";
 import type { ProviderView } from "@/server/services/providers";
 import type { RouteView } from "@/server/services/routes";
@@ -31,10 +32,12 @@ export function RoutesView({
   routes,
   providers,
   mcpTools,
+  builtinTools,
 }: {
   routes: RouteView[];
   providers: ProviderView[];
   mcpTools: McpToolView[];
+  builtinTools: BuiltinToolView[];
 }) {
   const router = useRouter();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -143,13 +146,19 @@ export function RoutesView({
       },
       {
         id: "mcp",
-        header: "MCP tools",
+        header: "Tools",
         enableSorting: false,
-        cell: ({ row }) => (
-          <Badge variant={row.original.mcp_tool_ids.length > 0 ? "secondary" : "outline"}>
-            {row.original.mcp_tool_ids.length}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const count = row.original.mcp_tool_ids.length + row.original.builtin_tools.length;
+          return (
+            <Badge
+              variant={count > 0 ? "secondary" : "outline"}
+              title={`${row.original.mcp_tool_ids.length} MCP, ${row.original.builtin_tools.length} built-in`}
+            >
+              {count}
+            </Badge>
+          );
+        },
       },
       {
         id: "enabled",
@@ -228,6 +237,7 @@ export function RoutesView({
         route={editing}
         providers={providers}
         mcpTools={mcpTools}
+        builtinTools={builtinTools}
         onOpenChange={setEditorOpen}
       />
 

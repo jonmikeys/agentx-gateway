@@ -54,7 +54,10 @@ effort: idle sessions still expire on their own, and the endpoint never fails fo
 client cannot act on, so a client sends it once and ignores the answer. The session shows in the
 CRM as `ended` with end reason `client`, and the next chat request with that id gets the usual
 `404 session_not_found`. Only the key that owns the session can end it; another key's call is a
-silent no-op, so ids cannot be probed.
+silent no-op, so ids cannot be probed. Ending (by the client, an admin or an agent change) or
+expiring a session also deletes its temporary web media items
+([web-search.md](web-search.md#temporary-media-items)); streaming one of them counts as session
+activity.
 
 ### Agents
 

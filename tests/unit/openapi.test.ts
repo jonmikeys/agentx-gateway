@@ -45,6 +45,7 @@ describe("OpenAPI document", () => {
         "/v1/cameras",
         "/v1/chat/completions",
         "/v1/media",
+        "/v1/media/{id}",
         "/v1/media/{id}/content",
         "/v1/models",
         "/v1/openapi.json",

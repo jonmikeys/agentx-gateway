@@ -1,4 +1,5 @@
 import { asc, eq, inArray } from "drizzle-orm";
+import { BUILTIN_TOOL_NAMES, type BuiltinToolName } from "@/lib/builtin-tools";
 import type { RouteWriteInput } from "@/lib/gateway-schemas";
 import { getDb } from "@/server/db/client";
 import { modelRoutes, providers, routeMcpTools, routeSteps } from "@/server/db/schema";
@@ -10,6 +11,7 @@ import {
   routeMcpToolIds,
 } from "@/server/services/mcp";
 import { type ProviderRuntime, toProviderRuntime } from "@/server/services/providers";
+import { availableBuiltinTools } from "@/server/tools/builtin/registry";
 
 export interface RouteStepView {
   position: number;
@@ -28,6 +30,8 @@ export interface RouteView {
   steps: RouteStepView[];
   /** Selected MCP tools (ids from `mcp_tools`). */
   mcp_tool_ids: string[];
+  /** Selected built-in tools, whether or not this deployment can currently run them. */
+  builtin_tools: BuiltinToolName[];
   created_at: string;
   updated_at: string;
 }
@@ -44,6 +48,8 @@ export interface ResolvedRoute {
   steps: ResolvedStep[];
   /** Allowed MCP tools offered on this route; empty when the route has none. */
   mcpTools: ResolvedMcpTool[];
+  /** Selected built-in tools this deployment can run (for example, search needs SEARXNG_URL). */
+  builtinTools: BuiltinToolName[];
 }
 
 type RouteRow = typeof modelRoutes.$inferSelect;
@@ -78,6 +84,12 @@ async function loadStepViews(routeIds: string[]): Promise<Map<string, RouteStepV
   return map;
 }
 
+/** Stored names that still exist in the catalogue, in catalogue order. */
+function knownBuiltinTools(stored: readonly string[]): BuiltinToolName[] {
+  const wanted = new Set(stored);
+  return BUILTIN_TOOL_NAMES.filter((name) => wanted.has(name));
+}
+
 function toView(row: RouteRow, steps: RouteStepView[], mcpToolIds: string[]): RouteView {
   return {
     id: row.id,
@@ -87,6 +99,7 @@ function toView(row: RouteRow, steps: RouteStepView[], mcpToolIds: string[]): Ro
     is_default: row.isDefault,
     steps,
     mcp_tool_ids: mcpToolIds,
+    builtin_tools: knownBuiltinTools(row.builtinTools),
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -135,6 +148,7 @@ export async function createRoute(input: RouteWriteInput): Promise<RouteView> {
           slug: input.slug,
           description: input.description,
           enabled: input.enabled,
+          builtinTools: [...new Set(input.builtin_tools)],
           // The first route ever created becomes the default.
           isDefault: existing.length === 0,
         })
@@ -183,6 +197,7 @@ export async function updateRoute(id: string, input: RouteWriteInput): Promise<R
           slug: input.slug,
           description: input.description,
           enabled: input.enabled,
+          builtinTools: [...new Set(input.builtin_tools)],
           updatedAt: new Date(),
         })
         .where(eq(modelRoutes.id, id));
@@ -276,5 +291,6 @@ export async function resolveRoute(selector: RouteSelector): Promise<ResolvedRou
       timeoutMs: step.timeoutMs,
     })),
     mcpTools: await resolveRouteMcpTools(route.id),
+    builtinTools: availableBuiltinTools(route.builtinTools),
   };
 }
